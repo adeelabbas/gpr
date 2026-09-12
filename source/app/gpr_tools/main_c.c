@@ -128,15 +128,15 @@ static unsigned int pixel_format_get_bits(GPR_PIXEL_FORMAT p)
 }
 
 // Maps a --quality level name to its enum. Returns 1 on match, 0 otherwise.
-static int parse_quality( const char* s, GPR_QUALITY* out )
+static int parse_quality( const char* s, VC5_ENCODER_QUALITY_SETTING* out )
 {
-    if( stricmp(s, "low")    == 0 ) { *out = GPR_QUALITY_LOW;    return 1; }
-    if( stricmp(s, "medium") == 0 ) { *out = GPR_QUALITY_MEDIUM; return 1; }
-    if( stricmp(s, "high")   == 0 ) { *out = GPR_QUALITY_HIGH;   return 1; }
-    if( stricmp(s, "fs1")    == 0 ) { *out = GPR_QUALITY_FS1;    return 1; }
-    if( stricmp(s, "fsx")    == 0 ) { *out = GPR_QUALITY_FSX;    return 1; }
-    if( stricmp(s, "fs2")    == 0 ) { *out = GPR_QUALITY_FS2;    return 1; }
-    if( stricmp(s, "ultra")  == 0 ) { *out = GPR_QUALITY_ULTRA;  return 1; }
+    if( stricmp(s, "low")    == 0 ) { *out = VC5_ENCODER_QUALITY_SETTING_LOW;    return 1; }
+    if( stricmp(s, "medium") == 0 ) { *out = VC5_ENCODER_QUALITY_SETTING_MEDIUM; return 1; }
+    if( stricmp(s, "high")   == 0 ) { *out = VC5_ENCODER_QUALITY_SETTING_HIGH;   return 1; }
+    if( stricmp(s, "fs1")    == 0 ) { *out = VC5_ENCODER_QUALITY_SETTING_FS1;    return 1; }
+    if( stricmp(s, "fsx")    == 0 ) { *out = VC5_ENCODER_QUALITY_SETTING_FSX;    return 1; }
+    if( stricmp(s, "fs2")    == 0 ) { *out = VC5_ENCODER_QUALITY_SETTING_FS2;    return 1; }
+    if( stricmp(s, "ultra")  == 0 ) { *out = VC5_ENCODER_QUALITY_SETTING_ULTRA;  return 1; }
     return 0;
 }
 
@@ -403,25 +403,6 @@ int dng_convert_main( const dng_convert_params* convert_params )
         }
     }
 
-    // --quality picks the VC-5 quantizer table for GPR output. Omitted means the SDK default
-    // (Film Scan 1, what every GPR this tool has ever written used), under which a GPR input
-    // is repackaged without re-encoding; any explicit level re-encodes. It means nothing for
-    // other output types, so asking for it there is an error rather than a silent no-op.
-    if( quality != NULL && strcmp(quality, "") )
-    {
-        if( output_file_type != FILE_TYPE_GPR )
-        {
-            fprintf( stderr, "--quality is only supported for GPR output\n" );
-            return -1;
-        }
-
-        if( parse_quality( quality, &params.quality ) == 0 )
-        {
-            fprintf( stderr, "Invalid quality `%s'; valid choices: low, medium, high, fs1, fsx, fs2, ultra\n", quality );
-            return -1;
-        }
-    }
-
     gpr_buffer output_buffer = { NULL, 0 };
 
     // input_skip_rows/cols shift the start of the raw image to adjust its Bayer phase
@@ -462,6 +443,36 @@ int dng_convert_main( const dng_convert_params* convert_params )
     {
         fprintf( stderr, "Invalid preview `%s'; expected a jpg file or one of: 2:1, 4:1, 8:1, 16:1\n", preview );
         return -1;
+    }
+
+    // --quality picks the VC-5 quantizer table used whenever the image is encoded to GPR.
+    // Omitted means the encoder default. It cannot apply to any other output type, nor to a
+    // GPR input that is only repackaged (the SDK re-encodes a GPR input only to generate a
+    // preview at a downscale ratio), so asking for it there is an error, not a silent no-op.
+    if( quality != NULL && strcmp(quality, "") )
+    {
+        const bool gpr_input_reencodes = params.enable_preview &&
+                                         params.preview_resolution != GPR_RGB_RESOLUTION_NONE;
+
+        const char* problem = NULL;
+
+        if( output_file_type != FILE_TYPE_GPR )
+            problem = "--quality is only supported for GPR output\n";
+        else if( input_file_type == FILE_TYPE_GPR && gpr_input_reencodes == false )
+            problem = "--quality does not apply: a GPR input is repackaged, not re-encoded, unless a generated "
+                      "preview (--preview=2:1|4:1|8:1|16:1) makes the SDK re-encode it\n";
+        else if( parse_quality( quality, &params.quality ) == 0 )
+            problem = "Invalid quality; valid choices: low, medium, high, fs1, fsx, fs2, ultra\n";
+
+        if( problem != NULL )
+        {
+            fprintf( stderr, "%s", problem );
+
+            if( preview_jpg.buffer )
+                allocator.Free( preview_jpg.buffer );
+
+            return -1;
+        }
     }
     
     if( input_file_type == FILE_TYPE_RAW && output_file_type == FILE_TYPE_DNG )

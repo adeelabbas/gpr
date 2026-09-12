@@ -29,6 +29,7 @@
 #include "gpr_allocator.h"
 #include "gpr_buffer.h"
 #include "gpr_rgb_buffer.h"
+#include "gpr_vc5_quality.h"
 
 #ifdef __cplusplus
     extern "C" {
@@ -40,25 +41,6 @@
                                                                     dimensions are read from the JPEG header when written */
 
         } gpr_preview_image;
-
-        /* VC-5 encoder quality for GPR output: the quantizer table applied to the wavelet
-           highpass bands, from the coarsest (LOW, smallest files) to the finest (ULTRA).
-           An encode-only setting; it changes nothing about how a file is read. */
-        typedef enum
-        {
-            GPR_QUALITY_DEFAULT = 0,    /* Film Scan 1, the level the SDK has always written. For a GPR
-                                           input (gpr_convert_gpr_to_gpr) it also means: keep the existing
-                                           bitstream rather than re-encode it. */
-
-            GPR_QUALITY_LOW     = 1,    /* CineForm Low */
-            GPR_QUALITY_MEDIUM  = 2,    /* CineForm Medium */
-            GPR_QUALITY_HIGH    = 3,    /* CineForm High */
-            GPR_QUALITY_FS1     = 4,    /* Film Scan 1 (what DEFAULT encodes with; an explicit choice re-encodes) */
-            GPR_QUALITY_FSX     = 5,    /* Film Scan X */
-            GPR_QUALITY_FS2     = 6,    /* Film Scan 2 */
-            GPR_QUALITY_ULTRA   = 7,    /* Finer than Film Scan 2: largest files, highest fidelity */
-
-        } GPR_QUALITY;
       
         typedef struct
         {
@@ -84,7 +66,9 @@
 
             GPR_RGB_RESOLUTION  preview_resolution; /* Resolution of the generated RGB preview (2:1, 4:1, 8:1, 16:1) */
 
-            GPR_QUALITY         quality;        /* VC-5 encoder quality for GPR output (see GPR_QUALITY) */
+            VC5_ENCODER_QUALITY_SETTING quality; /* VC-5 encoder quality (quantizer table) used whenever the
+                                                    image is encoded to GPR; VC5_ENCODER_QUALITY_SETTING_DEFAULT
+                                                    unless set. Changes nothing about how a file is read. */
 
             gpr_exif_info       exif_info;      /* Exif info object */
             
@@ -175,9 +159,9 @@
 #if GPR_WRITING && GPR_READING
         //!< gpr to gpr conversion: repackages the input's vc5 bitstream with the caller's
         //!< metadata, without decoding or re-encoding the image. Falls back to a full decode +
-        //!< re-encode when an auto-generated preview/thumbnail is requested (enable_preview
+        //!< re-encode only when an auto-generated preview/thumbnail is requested (enable_preview
         //!< set without supplying preview_image JPEG bytes), since that thumbnail is produced as
-        //!< a by-product of vc5 encoding, or when quality names an explicit level.
+        //!< a by-product of vc5 encoding.
         bool gpr_convert_gpr_to_gpr(const gpr_allocator*    allocator,
                                     const gpr_parameters*   parameters,
                                           gpr_buffer*       inp_gpr_buffer,

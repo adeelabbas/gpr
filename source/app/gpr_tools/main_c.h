@@ -59,10 +59,11 @@ extern "C" {
         int             jpg_quality;
 
         const char*     quality;                 /* VC-5 encoder quality for GPR output: low, medium, high,
-                                                    fs1, fsx, fs2 or ultra. NULL or empty: the SDK default
-                                                    (fs1), under which a GPR input is repackaged rather
-                                                    than re-encoded. Any explicit level re-encodes. Fails
-                                                    the conversion for other output types. */
+                                                    fs1, fsx, fs2 or ultra. NULL or empty: the encoder
+                                                    default (fsx). Fails the conversion when it cannot
+                                                    apply: any other output type, or a GPR input that is
+                                                    repackaged rather than re-encoded (no generated
+                                                    preview requested). */
 
         const char*     preview;                 /* Embedded preview image. NULL or empty: no preview is
                                                     written. The path of a jpg file on disk: that file is

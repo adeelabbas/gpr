@@ -370,24 +370,6 @@ static inline gpr_crop_info parse_crop_info(const dng_ifd &rawIFD, const AutoPtr
 
 #if GPR_WRITING
 
-// The encoder quantizer table for a public quality level. DEFAULT encodes as Film Scan 1,
-// the level the SDK has always written.
-static VC5_ENCODER_QUALITY_SETTING vc5_quality_setting( GPR_QUALITY quality )
-{
-    switch( quality )
-    {
-        case GPR_QUALITY_LOW:       return VC5_ENCODER_QUALITY_SETTING_LOW;
-        case GPR_QUALITY_MEDIUM:    return VC5_ENCODER_QUALITY_SETTING_MEDIUM;
-        case GPR_QUALITY_HIGH:      return VC5_ENCODER_QUALITY_SETTING_HIGH;
-        case GPR_QUALITY_FS1:       return VC5_ENCODER_QUALITY_SETTING_FS1;
-        case GPR_QUALITY_FSX:       return VC5_ENCODER_QUALITY_SETTING_FSX;
-        case GPR_QUALITY_FS2:       return VC5_ENCODER_QUALITY_SETTING_FS2;
-        case GPR_QUALITY_ULTRA:     return VC5_ENCODER_QUALITY_SETTING_ULTRA;
-        case GPR_QUALITY_DEFAULT:
-        default:                    return VC5_ENCODER_QUALITY_SETTING_FS1;
-    }
-}
-
 // shading_tables backs the preview's lens shading correction and is only read when the
 // encode runs, so the caller owns it and must keep it alive until EncodeVc5Image returns.
 static void set_vc5_encoder_parameters( vc5_encoder_parameters& vc5_encoder_params, const gpr_parameters* convert_params,
@@ -431,7 +413,7 @@ static void set_vc5_encoder_parameters( vc5_encoder_parameters& vc5_encoder_para
             break;
     }
     
-    vc5_encoder_params.quality_setting = vc5_quality_setting( convert_params->quality );
+    vc5_encoder_params.quality_setting = convert_params->quality;
 
     // Resolution and rendering parameters of the embedded preview. The preview pipeline
     // consumes the RGB output as 8-bit (it is re-encoded as JPEG), so rgb_bits stays at 8.
@@ -488,7 +470,7 @@ void gpr_parameters_set_defaults(gpr_parameters* x)
 
     x->preview_resolution = GPR_RGB_RESOLUTION_DEFAULT;
 
-    x->quality = GPR_QUALITY_DEFAULT;
+    x->quality = VC5_ENCODER_QUALITY_SETTING_DEFAULT;
 
     x->compute_md5sum = false;
 }
@@ -2384,8 +2366,7 @@ bool gpr_convert_dng_to_vc5(const gpr_allocator*    allocator,
 // avoiding the vc5 decode/re-encode entirely. The auto-generated thumbnail is a by-product
 // of running the vc5 encoder, so when the caller requests a preview without supplying the
 // JPEG bytes (enable_preview set, preview_image empty) the input is decoded and re-encoded
-// from scratch instead. So is an explicit quality level: a quantizer table can only apply
-// to an encode, and a caller naming one is asking for exactly that.
+// from scratch instead.
 bool gpr_convert_gpr_to_gpr(const gpr_allocator*    allocator,
                             const gpr_parameters*   parameters,
                                   gpr_buffer*       inp_gpr_buffer,
@@ -2402,9 +2383,7 @@ bool gpr_convert_gpr_to_gpr(const gpr_allocator*    allocator,
           parameters->preview_image.jpg_preview.size == 0 );
 #endif
 
-    const bool needs_encode = needs_encoded_thumbnail || parameters->quality != GPR_QUALITY_DEFAULT;
-
-    if( needs_encode == false )
+    if( needs_encoded_thumbnail == false )
     {
         gpr_buffer vc5_buffer = { NULL, 0 };
 
