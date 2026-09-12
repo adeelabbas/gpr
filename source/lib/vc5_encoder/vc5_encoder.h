@@ -64,11 +64,11 @@
         VC5_ENCODER_QUALITY_SETTING_FS1         = 3,		// Film Scan 1
         VC5_ENCODER_QUALITY_SETTING_FSX         = 4,		// Film Scan X
         VC5_ENCODER_QUALITY_SETTING_FS2         = 5,		// Film Scan 2 (Highest Quality)
-        VC5_ENCODER_QUALITY_SETTING_ULTRA       = 6,        // Film Scan 2 (Highest Quality)
+        VC5_ENCODER_QUALITY_SETTING_ULTRA       = 6,        // Ultra (finer than Film Scan 2: largest files, highest fidelity)
         
         VC5_ENCODER_QUALITY_SETTING_COUNT       = 7,
         
-        VC5_ENCODER_QUALITY_SETTING_DEFAULT     = VC5_ENCODER_QUALITY_SETTING_FS1,
+        VC5_ENCODER_QUALITY_SETTING_DEFAULT     = VC5_ENCODER_QUALITY_SETTING_FSX,
         
     } VC5_ENCODER_QUALITY_SETTING;
 

@@ -413,7 +413,9 @@ static void set_vc5_encoder_parameters( vc5_encoder_parameters& vc5_encoder_para
             break;
     }
     
-    vc5_encoder_params.quality_setting = VC5_ENCODER_QUALITY_SETTING_DEFAULT;
+    // Film Scan 1 is what the SDK has always written, independent of the encoder library's own
+    // default (Filmscan-X), which only applies to callers driving vc5_encoder_process directly.
+    vc5_encoder_params.quality_setting = VC5_ENCODER_QUALITY_SETTING_FS1;
 
     // Resolution and rendering parameters of the embedded preview. The preview pipeline
     // consumes the RGB output as 8-bit (it is re-encoded as JPEG), so rgb_bits stays at 8.
