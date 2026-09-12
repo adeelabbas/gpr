@@ -19,7 +19,7 @@ This repository is a fork of [gopro/gpr](https://github.com/gopro/gpr) that exte
 * **Apple ImageIO compatibility.** Apple's RAW pipeline drops a DNG's entire `OpcodeList2` gain map unless the two green CFA planes carry byte-identical gains; the writer now equalizes them, identifying the greens by each opcode's own CFA cell rather than by list position.
 * **Lens-distortion correction on DNG output.** Built-in geometric profiles for HERO5 through HERO13 and MISSION 1 PRO write a synthesized `WarpRectilinear` (`gpr_tools --lens_correction=auto|k0,k1,k2,k3[,cx,cy]`, `--lens_correction_strength`), also exposed as `gpr_parameters_apply_lens_profile` in the SDK.
 * **Previews and thumbnails.** An embedded preview can be generated at 2:1, 4:1, 8:1 or 16:1 (`--preview=<ratio>`) or supplied as a JPEG whose dimensions are read from its header (`--preview=file.jpg`). The preview renders through the same pipeline as the RGB decode (camera color matrix with illuminant interpolation and Bradford adaptation, the ACR3 default tone curve, lens shading from the gain maps), so it matches a decode of the file it is embedded in. Plain DNG output gets a thumbnail in IFD 0, where readers look for it, and `dng_to_dng` carries an existing thumbnail across.
-* **New conversions.** `gpr_convert_gpr_to_gpr` repackages the VC-5 bitstream with new metadata without re-encoding; `gpr_convert_gpr_to_ppm` / `gpr_convert_gpr_to_jpg` (with the EXIF orientation) move into the SDK; `gpr_convert_dng_to_vc5` now actually encodes; `gpr_parameters_parse_dng` / `gpr_parameters_parse_dng_file` fill `gpr_parameters` from a file's metadata.
+* **New conversions.** `gpr_convert_gpr_to_gpr` repackages the VC-5 bitstream with new metadata without re-encoding (or re-encodes when `gpr_parameters::quality` names a level); `gpr_convert_gpr_to_ppm` / `gpr_convert_gpr_to_jpg` (with the EXIF orientation) move into the SDK; `gpr_convert_dng_to_vc5` now actually encodes; `gpr_parameters_parse_dng` / `gpr_parameters_parse_dng_file` fill `gpr_parameters` from a file's metadata.
 * **Robustness.** VC-5 memory streams refuse to write past their buffer (no more silent heap corruption on large frames), the thumbnail JPEG buffer grows instead of assuming a compression ratio, the Bayer-phase shift no longer reads past the end of the raw buffer, DNG SDK exceptions are caught at the C API and reported as `false`, and the XMP toolkit is built with real locks so several files can be processed concurrently in one process.
 * **Faster writing.** Output goes through a contiguous, growable stream handed to the caller without a final copy, `dng_to_dng` skips its redundant pixel copies (25-35% faster on large DNGs), and `tiny_jpeg` uses a batched bit-writer with 4:2:0 chroma at the two lower quality levels.
 * **Build and test.** The `GPR_READING`, `GPR_WRITING`, `GPR_JPEG_AVAILABLE`, `GPR_TIMING` and `GPR_NEON` switches are CMake options (NEON is enabled automatically on arm64), `scripts/test_build_flags.sh` and the GitHub Actions workflow build every configuration, and `source/test` holds a conversion test suite (`gpr_tools_tests`) that drives every `gpr_convert_*` entry point over the bundled samples.
@@ -149,6 +149,12 @@ Embed a preview while writing a GPR, either generated at a downscale ratio (2:1,
 ```
 $ gpr_tools -i INPUT.DNG -o OUTPUT.GPR --preview=8:1
 $ gpr_tools -i INPUT.DNG -o OUTPUT.GPR --preview=THUMBNAIL.JPG
+```
+
+Re-encode a GPR at a different VC-5 quality, which selects the quantizer table for the wavelet highpass bands. Without `--quality`, a GPR input is repackaged as-is and any other input encodes at Film Scan 1, the level the SDK has always used. The levels, from the smallest files to the highest fidelity, are `low`, `medium`, `high`, `fs1`, `fsx`, `fs2` and `ultra`:
+
+```
+$ gpr_tools -i INPUT.GPR -o OUTPUT.GPR --quality=fs2
 ```
 
 Convert a BGGR DNG (for example from an iPhone) to GPR. Shifting the mosaic by one column turns BGGR into GBRG, the phase GoPro cameras write; the mosaic can also be encoded as-is with `--input_pixel_format=bggr12`:
