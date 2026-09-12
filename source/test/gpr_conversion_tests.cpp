@@ -41,6 +41,8 @@
 #include "gpr.h"
 #include "gpr_flat_write_stream.h"
 #include "gpr_lens_profiles.h"
+#include <cassert>               // the codec headers below use assert but leave including it to their .c files
+#include "vc5_encoder.h"         // the encoder library's own default quality
 #include "main_c.h"              // gpr_tools' CLI conversion layer (dng_convert_main)
 #include "program_options_lite.h" // gpr_tools' command-line scanner
 
@@ -1683,6 +1685,138 @@ static void run_lens_correction_cli_tests( const std::string& data_dir )
 }
 
 // ---------------------------------------------------------------------------
+// gpr_tools --quality (dng_convert_main)
+//
+// Selects the VC-5 quantizer table for GPR output. Omitted keeps the SDK's
+// Film Scan 1 and leaves a GPR input's bitstream alone; any explicit level
+// re-encodes at that level. Other output types reject it. Uses the sample
+// run_preview_cli_tests loaded (g_cli_sample), so it runs after it.
+// ---------------------------------------------------------------------------
+
+static void run_quality_cli_tests()
+{
+    std::fprintf( stdout, "\n== gpr_tools --quality (dng_convert_main) ==\n" );
+
+    run_case( "quality defaults: SDK parameters DEFAULT, encoder library Filmscan-X", []{
+        gpr_parameters params;
+        gpr_parameters_set_defaults( &params );
+        check( params.quality == GPR_QUALITY_DEFAULT, "gpr_parameters_set_defaults gives GPR_QUALITY_DEFAULT" );
+        gpr_parameters_destroy( &params, g_alloc.Free );
+
+        // The library default only reaches callers of vc5_encoder_process directly; the SDK
+        // names its own level. A regression here would change vc5_encoder_app's output.
+        vc5_encoder_parameters enc;
+        vc5_encoder_parameters_set_default( &enc );
+        check( enc.quality_setting == VC5_ENCODER_QUALITY_SETTING_FSX, "vc5_encoder_parameters_set_default gives Filmscan-X" );
+    });
+
+    // A DNG input always encodes, so omitting --quality and naming fs1 must produce the same
+    // bytes: the default level is Film Scan 1, and nothing else about the encode may differ.
+    run_case( "--quality omitted encodes as fs1 (DNG -> GPR byte-identical)", []{
+        const std::string dng = scratch_path( "quality_src.DNG" );
+        dng_convert_params p = preview_cli_params( g_cli_sample.c_str(), dng.c_str(), "" );
+        check( dng_convert_main( &p ) == 0, "GPR -> DNG succeeds" );
+
+        const std::string out_default = scratch_path( "quality_default.GPR" );
+        const std::string out_fs1     = scratch_path( "quality_fs1.GPR" );
+
+        dng_convert_params pd = preview_cli_params( dng.c_str(), out_default.c_str(), "" );
+        check( dng_convert_main( &pd ) == 0, "default encode succeeds" );
+
+        dng_convert_params pf = preview_cli_params( dng.c_str(), out_fs1.c_str(), "" );
+        pf.quality = "fs1";
+        check( dng_convert_main( &pf ) == 0, "--quality=fs1 encode succeeds" );
+
+        Buffer a, b;
+        const bool loaded = load_file( out_default.c_str(), a ) && load_file( out_fs1.c_str(), b );
+        std::remove( dng.c_str() );
+        std::remove( out_default.c_str() );
+        std::remove( out_fs1.c_str() );
+        check( loaded, "outputs written" );
+        if( loaded )
+            check( a.b.size == b.b.size && std::memcmp( a.b.buffer, b.b.buffer, a.b.size ) == 0,
+                   "default and fs1 outputs byte-identical" );
+    });
+
+    // Each level quantizes the highpass bands finer than the one before it, so on the same
+    // input every step up must produce a larger file. The size is the independent evidence
+    // that a different table was actually applied.
+    run_case( "--quality=<level>: every level encodes, files grow with quality", []{
+        const char* levels[] = { "low", "medium", "high", "fs1", "fsx", "fs2", "ultra" };
+        size_t prev = 0;
+        for( size_t i = 0; i < sizeof(levels) / sizeof(levels[0]); ++i )
+        {
+            const std::string out = scratch_path( "quality_level.GPR" );
+            dng_convert_params p = preview_cli_params( g_cli_sample.c_str(), out.c_str(), "" );
+            p.quality = levels[i];
+            check( dng_convert_main( &p ) == 0, "conversion succeeds" );
+
+            Buffer o;
+            const bool loaded = load_file( out.c_str(), o );
+            std::remove( out.c_str() );
+            check( loaded, "output written" );
+            if( !loaded ) continue;
+
+            validate_dng_like( o, g_cli_W, g_cli_H, /*vc5=*/true );
+            check( o.b.size > prev, "larger than the previous level" );
+            prev = o.b.size;
+        }
+    });
+
+    // Without --quality a GPR input keeps the camera's bitstream; an explicit level replaces
+    // it with a fresh encode, which cannot reproduce the camera's bytes.
+    run_case( "--quality re-encodes a GPR input; omitted repackages it", []{
+        const std::string out_repack = scratch_path( "quality_repack.GPR" );
+        const std::string out_fs1    = scratch_path( "quality_reenc.GPR" );
+
+        dng_convert_params pr = preview_cli_params( g_cli_sample.c_str(), out_repack.c_str(), "" );
+        check( dng_convert_main( &pr ) == 0, "repackage succeeds" );
+
+        dng_convert_params pf = preview_cli_params( g_cli_sample.c_str(), out_fs1.c_str(), "" );
+        pf.quality = "fs1";
+        check( dng_convert_main( &pf ) == 0, "re-encode succeeds" );
+
+        Buffer r, f;
+        const bool loaded = load_file( out_repack.c_str(), r ) && load_file( out_fs1.c_str(), f );
+        std::remove( out_repack.c_str() );
+        std::remove( out_fs1.c_str() );
+        check( loaded, "outputs written" );
+        if( !loaded ) return;
+
+        validate_dng_like( r, g_cli_W, g_cli_H, /*vc5=*/true );
+        validate_dng_like( f, g_cli_W, g_cli_H, /*vc5=*/true );
+        check( r.b.size != f.b.size || std::memcmp( r.b.buffer, f.b.buffer, r.b.size ) != 0,
+               "re-encoded output differs from the repackaged one" );
+    });
+
+    run_case( "--quality=<garbage> fails, no output", []{
+        const char* bad[] = { "best", "fs3", "1" };
+        for( size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); ++i )
+        {
+            const std::string out = scratch_path( "quality_bad.GPR" );
+            dng_convert_params p = preview_cli_params( g_cli_sample.c_str(), out.c_str(), "" );
+            p.quality = bad[i];
+            check( dng_convert_main( &p ) != 0, "conversion reports failure" );
+
+            FILE* fh = fopen( out.c_str(), "rb" );
+            check( fh == NULL, "no output file written" );
+            if( fh ) { fclose( fh ); std::remove( out.c_str() ); }
+        }
+    });
+
+    run_case( "--quality with DNG output fails, no output", []{
+        const std::string out = scratch_path( "quality_dng.DNG" );
+        dng_convert_params p = preview_cli_params( g_cli_sample.c_str(), out.c_str(), "" );
+        p.quality = "fs2";
+        check( dng_convert_main( &p ) != 0, "conversion reports failure" );
+
+        FILE* fh = fopen( out.c_str(), "rb" );
+        check( fh == NULL, "no output file written" );
+        if( fh ) { fclose( fh ); std::remove( out.c_str() ); }
+    });
+}
+
+// ---------------------------------------------------------------------------
 // Command-line scanning (program_options_lite)
 //
 // Unknown options and options missing their value must be flagged as fatal via
@@ -1899,6 +2033,8 @@ int main( int argc, char* argv[] )
     run_preview_cli_tests( std::string(data_dir) + "/Hero6/GOPR0024.GPR" );
 
     run_lens_correction_cli_tests( data_dir );
+
+    run_quality_cli_tests();
 
     run_argument_parser_tests();
 

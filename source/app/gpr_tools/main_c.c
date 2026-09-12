@@ -127,6 +127,19 @@ static unsigned int pixel_format_get_bits(GPR_PIXEL_FORMAT p)
     }
 }
 
+// Maps a --quality level name to its enum. Returns 1 on match, 0 otherwise.
+static int parse_quality( const char* s, GPR_QUALITY* out )
+{
+    if( stricmp(s, "low")    == 0 ) { *out = GPR_QUALITY_LOW;    return 1; }
+    if( stricmp(s, "medium") == 0 ) { *out = GPR_QUALITY_MEDIUM; return 1; }
+    if( stricmp(s, "high")   == 0 ) { *out = GPR_QUALITY_HIGH;   return 1; }
+    if( stricmp(s, "fs1")    == 0 ) { *out = GPR_QUALITY_FS1;    return 1; }
+    if( stricmp(s, "fsx")    == 0 ) { *out = GPR_QUALITY_FSX;    return 1; }
+    if( stricmp(s, "fs2")    == 0 ) { *out = GPR_QUALITY_FS2;    return 1; }
+    if( stricmp(s, "ultra")  == 0 ) { *out = GPR_QUALITY_ULTRA;  return 1; }
+    return 0;
+}
+
 // Maps a downscale ratio string to its enum. Returns 1 on match, 0 otherwise.
 static int parse_ratio( const char* ratio, GPR_RGB_RESOLUTION* out )
 {
@@ -174,6 +187,7 @@ int dng_convert_main( const dng_convert_params* convert_params )
     int          rgb_file_bits          = convert_params->rgb_file_bits;
     int          jpg_quality            = convert_params->jpg_quality;
     const char*  preview                = convert_params->preview;
+    const char*  quality                = convert_params->quality;
 
     bool success;
     bool write_buffer_to_file = true;
@@ -386,6 +400,25 @@ int dng_convert_main( const dng_convert_params* convert_params )
         if( lens_result == GPR_LENS_PROFILE_ALREADY_GEOMETRIC )
         {
             fprintf( stderr, "Input already carries a geometric lens correction; --lens_correction ignored\n" );
+        }
+    }
+
+    // --quality picks the VC-5 quantizer table for GPR output. Omitted means the SDK default
+    // (Film Scan 1, what every GPR this tool has ever written used), under which a GPR input
+    // is repackaged without re-encoding; any explicit level re-encodes. It means nothing for
+    // other output types, so asking for it there is an error rather than a silent no-op.
+    if( quality != NULL && strcmp(quality, "") )
+    {
+        if( output_file_type != FILE_TYPE_GPR )
+        {
+            fprintf( stderr, "--quality is only supported for GPR output\n" );
+            return -1;
+        }
+
+        if( parse_quality( quality, &params.quality ) == 0 )
+        {
+            fprintf( stderr, "Invalid quality `%s'; valid choices: low, medium, high, fs1, fsx, fs2, ultra\n", quality );
+            return -1;
         }
     }
 

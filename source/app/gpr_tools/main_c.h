@@ -58,6 +58,12 @@ extern "C" {
         int             rgb_file_bits;
         int             jpg_quality;
 
+        const char*     quality;                 /* VC-5 encoder quality for GPR output: low, medium, high,
+                                                    fs1, fsx, fs2 or ultra. NULL or empty: the SDK default
+                                                    (fs1), under which a GPR input is repackaged rather
+                                                    than re-encoded. Any explicit level re-encodes. Fails
+                                                    the conversion for other output types. */
+
         const char*     preview;                 /* Embedded preview image. NULL or empty: no preview is
                                                     written. The path of a jpg file on disk: that file is
                                                     embedded as the preview. 2:1, 4:1, 8:1 or 16:1: a
