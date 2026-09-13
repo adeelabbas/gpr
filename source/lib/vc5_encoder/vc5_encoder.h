@@ -54,8 +54,7 @@
         
     } VC5_ENCODER_PIXEL_FORMAT;
 
-    // The quality setting (VC5_ENCODER_QUALITY_SETTING) is declared in gpr_vc5_quality.h, so
-    // that the SDK's public gpr_parameters can carry it in every build configuration.
+    // VC5_ENCODER_QUALITY_SETTING is declared in gpr_vc5_quality.h, shared with the SDK API.
 
     /*!
      @brief vc5 encoder parameters
@@ -70,7 +69,7 @@
         
         VC5_ENCODER_PIXEL_FORMAT    pixel_format;         // Bayer Ordering Pattern (Default: VC5_ENCODER_BAYER_ORDERING_RGGB)
         
-        VC5_ENCODER_QUALITY_SETTING quality_setting;        // Quality setting of the encoder (Default: VC5_ENCODER_QUALITY_SETTING_FS2)
+        VC5_ENCODER_QUALITY_SETTING quality_setting;        // Quality setting of the encoder (Default: VC5_ENCODER_QUALITY_SETTING_DEFAULT)
         
         gpr_malloc                  mem_alloc;              // Callback function to allocate memory
         

@@ -104,9 +104,9 @@ public:
         ("output_format,f",         output_format,        string(""),       "Output file format, overrides the format implied by output file extension \n"
                                                                             "Choices: GPR, DNG. Use to write a GPR encoded file with DNG extension \n"
                                                                             "(DNG format with GPR extension is not allowed)")
-        ("quality",                 quality,              string(""),       "VC-5 encoder quality, only applicable when the image is encoded to GPR \n"
+        ("quality",                 quality,              string(""),       "VC-5 encoder quality, only applicable when writing GPR \n"
                                                                             "Choices: low, medium, high, fs1, [fsx], fs2, ultra (smallest files to highest fidelity) \n"
-                                                                            "A GPR input is repackaged as-is, so it applies there only with a generated --preview")
+                                                                            "A GPR input, otherwise repackaged as-is, is decoded and re-encoded at this quality")
         ("gpmf_path,g",             gpmf_path,            string(""),       "GPMF file path")
 
         ("lens_correction",         lens_correction,      string(""),       "Write a geometric lens-distortion correction (DNG output only) \n"

@@ -41,8 +41,6 @@
 #include "gpr.h"
 #include "gpr_flat_write_stream.h"
 #include "gpr_lens_profiles.h"
-#include <cassert>               // the codec headers below use assert but leave including it to their .c files
-#include "vc5_encoder.h"         // the encoder library's own default quality
 #include "main_c.h"              // gpr_tools' CLI conversion layer (dng_convert_main)
 #include "program_options_lite.h" // gpr_tools' command-line scanner
 
@@ -597,6 +595,15 @@ static bool save_file( const char* path, const void* data, size_t size )
     const size_t wr = fwrite( data, 1, size, f );
     fclose( f );
     return wr == size;
+}
+
+// A conversion that failed must not have left an output file behind; a stray one is removed
+// so the next case starts clean.
+static void check_no_output( const std::string& path )
+{
+    FILE* f = fopen( path.c_str(), "rb" );
+    check( f == NULL, "no output file written" );
+    if( f ) { fclose( f ); std::remove( path.c_str() ); }
 }
 
 // Scratch-file path for one case. Cases clean up after themselves; the pid
@@ -1383,9 +1390,7 @@ static void run_preview_cli_tests( const std::string& sample_path )
             dng_convert_params p = preview_cli_params( g_cli_sample.c_str(), out.c_str(), bad[i] );
             check( dng_convert_main( &p ) != 0, "conversion reports failure" );
 
-            FILE* f = fopen( out.c_str(), "rb" );
-            check( f == NULL, "no output file written" );
-            if( f ) { fclose( f ); std::remove( out.c_str() ); }
+            check_no_output( out );
         }
     });
 }
@@ -1487,9 +1492,7 @@ static void run_lens_correction_cli_tests( const std::string& data_dir )
         p.lens_correction = "auto";
         check( dng_convert_main( &p ) != 0, "conversion reports failure" );
 
-        FILE* f = fopen( out.c_str(), "rb" );
-        check( f == NULL, "no output file written" );
-        if( f ) { fclose( f ); std::remove( out.c_str() ); }
+        check_no_output( out );
     });
 
     run_case( "--lens_correction=auto: known camera model (HERO6) writes a warp", []{
@@ -1558,18 +1561,14 @@ static void run_lens_correction_cli_tests( const std::string& data_dir )
                 p.lens_correction = "auto";
                 p.lens_correction_strength = bad[i];
                 check( dng_convert_main( &p ) != 0, "invalid strength reports failure" );
-                FILE* f = fopen( out.c_str(), "rb" );
-                check( f == NULL, "no output file written" );
-                if( f ) { fclose( f ); std::remove( out.c_str() ); }
+                check_no_output( out );
             }
 
             const std::string out = scratch_path( "lens_sonly.DNG" );
             dng_convert_params p = preview_cli_params( in.c_str(), out.c_str(), "" );
             p.lens_correction_strength = "0.5";
             check( dng_convert_main( &p ) != 0, "strength without lens_correction fails" );
-            FILE* f = fopen( out.c_str(), "rb" );
-            check( f == NULL, "no output file written" );
-            if( f ) { fclose( f ); std::remove( out.c_str() ); }
+            check_no_output( out );
         }
     });
 
@@ -1661,9 +1660,7 @@ static void run_lens_correction_cli_tests( const std::string& data_dir )
         p.lens_correction = "1.0,0.1,0,0";
         check( dng_convert_main( &p ) != 0, "conversion reports failure" );
 
-        FILE* f = fopen( out.c_str(), "rb" );
-        check( f == NULL, "no output file written" );
-        if( f ) { fclose( f ); std::remove( out.c_str() ); }
+        check_no_output( out );
     });
 
     run_case( "--lens_correction=<garbage> fails, no output", []{
@@ -1677,9 +1674,7 @@ static void run_lens_correction_cli_tests( const std::string& data_dir )
             p.lens_correction = bad[i];
             check( dng_convert_main( &p ) != 0, "conversion reports failure" );
 
-            FILE* f = fopen( out.c_str(), "rb" );
-            check( f == NULL, "no output file written" );
-            if( f ) { fclose( f ); std::remove( out.c_str() ); }
+            check_no_output( out );
         }
     });
 }
@@ -1688,66 +1683,47 @@ static void run_lens_correction_cli_tests( const std::string& data_dir )
 // gpr_tools --quality (dng_convert_main)
 //
 // Selects the VC-5 quantizer table used whenever the image is encoded to GPR.
-// Omitted means the encoder default (Filmscan-X). It is rejected where it
-// cannot apply: other output types, and a GPR input that is only repackaged.
-// Uses the sample run_preview_cli_tests loaded (g_cli_sample), so it runs
-// after it.
+// Omitted means the encoder default (Filmscan-X). A GPR input is repackaged
+// unless --quality asks for a re-encode; other output types reject it. Uses
+// the sample run_preview_cli_tests loaded (g_cli_sample), so it runs after it.
 // ---------------------------------------------------------------------------
 
 static void run_quality_cli_tests()
 {
     std::fprintf( stdout, "\n== gpr_tools --quality (dng_convert_main) ==\n" );
 
-    run_case( "quality defaults: one enum, encoder default Filmscan-X, SDK parameters follow it", []{
-        // The library default reaches vc5_encoder_app (vc5_encoder_process directly) and,
-        // through gpr_parameters_set_defaults, every GPR the SDK writes.
-        check( VC5_ENCODER_QUALITY_SETTING_DEFAULT == VC5_ENCODER_QUALITY_SETTING_FSX, "encoder default is Filmscan-X" );
+    if( g_cli_sample.empty() )
+    {
+        run_case( "--quality: CLI sample", []{ check( false, "run_preview_cli_tests must run first (no CLI sample loaded)" ); } );
+        return;
+    }
 
-        vc5_encoder_parameters enc;
-        vc5_encoder_parameters_set_default( &enc );
-        check( enc.quality_setting == VC5_ENCODER_QUALITY_SETTING_DEFAULT, "vc5_encoder_parameters_set_default gives the default" );
+    run_case( "quality defaults: one enum, encoder default Filmscan-X, SDK parameters follow it", []{
+        check( VC5_ENCODER_QUALITY_SETTING_DEFAULT == VC5_ENCODER_QUALITY_SETTING_FSX, "encoder default is Filmscan-X" );
 
         gpr_parameters params;
         gpr_parameters_set_defaults( &params );
-        check( params.quality == VC5_ENCODER_QUALITY_SETTING_DEFAULT, "gpr_parameters_set_defaults gives the same default" );
+        check( params.quality == VC5_ENCODER_QUALITY_SETTING_DEFAULT, "gpr_parameters_set_defaults gives the encoder default" );
+        check( params.reencode == false, "gpr_parameters_set_defaults does not ask for a re-encode" );
         gpr_parameters_destroy( &params, g_alloc.Free );
     });
 
-    // A DNG input always encodes, so omitting --quality and naming fsx must produce the same
-    // bytes: the default level is Filmscan-X, and nothing else about the encode may differ.
-    run_case( "--quality omitted encodes as fsx (DNG -> GPR byte-identical)", []{
+    // A DNG input always encodes. Each level quantizes the highpass bands finer than the one
+    // before it, so every step up must produce a larger file: the size is the independent
+    // evidence that a different table was applied. Omitting --quality must give the fsx bytes
+    // exactly, since that is the default and nothing else about the encode may differ.
+    run_case( "--quality=<level> on a DNG input: files grow with quality, omitted equals fsx", []{
         const std::string dng = scratch_path( "quality_src.DNG" );
-        dng_convert_params p = preview_cli_params( g_cli_sample.c_str(), dng.c_str(), "" );
-        check( dng_convert_main( &p ) == 0, "GPR -> DNG succeeds" );
-
-        const std::string out_default = scratch_path( "quality_default.GPR" );
-        const std::string out_fsx     = scratch_path( "quality_fsx.GPR" );
-
-        dng_convert_params pd = preview_cli_params( dng.c_str(), out_default.c_str(), "" );
-        check( dng_convert_main( &pd ) == 0, "default encode succeeds" );
-
-        dng_convert_params pf = preview_cli_params( dng.c_str(), out_fsx.c_str(), "" );
-        pf.quality = "fsx";
-        check( dng_convert_main( &pf ) == 0, "--quality=fsx encode succeeds" );
-
-        Buffer a, b;
-        const bool loaded = load_file( out_default.c_str(), a ) && load_file( out_fsx.c_str(), b );
-        std::remove( dng.c_str() );
-        std::remove( out_default.c_str() );
-        std::remove( out_fsx.c_str() );
-        check( loaded, "outputs written" );
-        if( loaded )
-            check( a.b.size == b.b.size && std::memcmp( a.b.buffer, b.b.buffer, a.b.size ) == 0,
-                   "default and fsx outputs byte-identical" );
-    });
-
-    // Each level quantizes the highpass bands finer than the one before it, so on the same
-    // input every step up must produce a larger file. The size is the independent evidence
-    // that a different table was actually applied. A DNG input, so every run encodes.
-    run_case( "--quality=<level>: every level encodes, files grow with quality", []{
-        const std::string dng = scratch_path( "quality_ladder.DNG" );
         dng_convert_params pd = preview_cli_params( g_cli_sample.c_str(), dng.c_str(), "" );
         check( dng_convert_main( &pd ) == 0, "GPR -> DNG succeeds" );
+
+        const std::string out_default = scratch_path( "quality_default.GPR" );
+        dng_convert_params p0 = preview_cli_params( dng.c_str(), out_default.c_str(), "" );
+        check( dng_convert_main( &p0 ) == 0, "default encode succeeds" );
+
+        Buffer d;
+        check( load_file( out_default.c_str(), d ), "default output written" );
+        std::remove( out_default.c_str() );
 
         const char* levels[] = { "low", "medium", "high", "fs1", "fsx", "fs2", "ultra" };
         size_t prev = 0;
@@ -1767,56 +1743,48 @@ static void run_quality_cli_tests()
             validate_dng_like( o, g_cli_W, g_cli_H, /*vc5=*/true );
             check( o.b.size > prev, "larger than the previous level" );
             prev = o.b.size;
+
+            if( std::strcmp( levels[i], "fsx" ) == 0 && d.valid() )
+                check( o.b.size == d.b.size && std::memcmp( o.b.buffer, d.b.buffer, o.b.size ) == 0,
+                       "fsx output byte-identical to the default output" );
         }
         std::remove( dng.c_str() );
     });
 
-    // A GPR input is repackaged, so --quality alone has nothing to apply to and is refused;
-    // a generated preview makes the SDK re-encode, and the level then shows in the size.
-    run_case( "--quality on a GPR input: refused when repackaging, applied when re-encoding", []{
-        const std::string out_bad = scratch_path( "quality_repack.GPR" );
-        dng_convert_params pb = preview_cli_params( g_cli_sample.c_str(), out_bad.c_str(), "" );
-        pb.quality = "fs2";
-        check( dng_convert_main( &pb ) != 0, "repackage with --quality reports failure" );
-        FILE* fh = fopen( out_bad.c_str(), "rb" );
-        check( fh == NULL, "no output file written" );
-        if( fh ) { fclose( fh ); std::remove( out_bad.c_str() ); }
+    // A GPR input is repackaged without --quality; with it, the SDK decodes and re-encodes at
+    // the level. Every bundled sample is encoded far above CineForm Low, so a `low` re-encode
+    // has to come out well under the repackaged file while still being a valid vc5 GPR.
+    run_case( "--quality on a GPR input re-encodes it; omitted repackages", []{
+        const std::string out_repack = scratch_path( "quality_repack.GPR" );
+        dng_convert_params pr = preview_cli_params( g_cli_sample.c_str(), out_repack.c_str(), "" );
+        check( dng_convert_main( &pr ) == 0, "repackage succeeds" );
 
-        const std::string out_fs1 = scratch_path( "quality_reenc_fs1.GPR" );
-        const std::string out_fs2 = scratch_path( "quality_reenc_fs2.GPR" );
+        const std::string out_low = scratch_path( "quality_low.GPR" );
+        dng_convert_params pl = preview_cli_params( g_cli_sample.c_str(), out_low.c_str(), "" );
+        pl.quality = "low";
+        check( dng_convert_main( &pl ) == 0, "re-encode at low succeeds" );
 
-        dng_convert_params p1 = preview_cli_params( g_cli_sample.c_str(), out_fs1.c_str(), "16:1" );
-        p1.quality = "fs1";
-        check( dng_convert_main( &p1 ) == 0, "re-encode at fs1 with a preview succeeds" );
-
-        dng_convert_params p2 = preview_cli_params( g_cli_sample.c_str(), out_fs2.c_str(), "16:1" );
-        p2.quality = "fs2";
-        check( dng_convert_main( &p2 ) == 0, "re-encode at fs2 with a preview succeeds" );
-
-        Buffer a, b;
-        const bool loaded = load_file( out_fs1.c_str(), a ) && load_file( out_fs2.c_str(), b );
-        std::remove( out_fs1.c_str() );
-        std::remove( out_fs2.c_str() );
+        Buffer r, l;
+        const bool loaded = load_file( out_repack.c_str(), r ) && load_file( out_low.c_str(), l );
+        std::remove( out_repack.c_str() );
+        std::remove( out_low.c_str() );
         check( loaded, "outputs written" );
         if( !loaded ) return;
 
-        validate_dng_like( a, g_cli_W, g_cli_H, /*vc5=*/true );
-        validate_dng_like( b, g_cli_W, g_cli_H, /*vc5=*/true );
-        check( b.b.size > a.b.size, "fs2 output larger than fs1 output" );
+        validate_dng_like( r, g_cli_W, g_cli_H, /*vc5=*/true );
+        validate_dng_like( l, g_cli_W, g_cli_H, /*vc5=*/true );
+        check( l.b.size < r.b.size, "low re-encode smaller than the repackaged camera bitstream" );
     });
 
     run_case( "--quality=<garbage> fails, no output", []{
-        const char* bad[] = { "best", "fs3", "1" };
+        const char* bad[] = { "best", "fs3", "1", "fsx " };
         for( size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); ++i )
         {
             const std::string out = scratch_path( "quality_bad.GPR" );
-            dng_convert_params p = preview_cli_params( g_cli_sample.c_str(), out.c_str(), "16:1" );
+            dng_convert_params p = preview_cli_params( g_cli_sample.c_str(), out.c_str(), "" );
             p.quality = bad[i];
             check( dng_convert_main( &p ) != 0, "conversion reports failure" );
-
-            FILE* fh = fopen( out.c_str(), "rb" );
-            check( fh == NULL, "no output file written" );
-            if( fh ) { fclose( fh ); std::remove( out.c_str() ); }
+            check_no_output( out );
         }
     });
 
@@ -1825,10 +1793,7 @@ static void run_quality_cli_tests()
         dng_convert_params p = preview_cli_params( g_cli_sample.c_str(), out.c_str(), "" );
         p.quality = "fs2";
         check( dng_convert_main( &p ) != 0, "conversion reports failure" );
-
-        FILE* fh = fopen( out.c_str(), "rb" );
-        check( fh == NULL, "no output file written" );
-        if( fh ) { fclose( fh ); std::remove( out.c_str() ); }
+        check_no_output( out );
     });
 }
 

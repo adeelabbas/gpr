@@ -60,10 +60,9 @@ extern "C" {
 
         const char*     quality;                 /* VC-5 encoder quality for GPR output: low, medium, high,
                                                     fs1, fsx, fs2 or ultra. NULL or empty: the encoder
-                                                    default (fsx). Fails the conversion when it cannot
-                                                    apply: any other output type, or a GPR input that is
-                                                    repackaged rather than re-encoded (no generated
-                                                    preview requested). */
+                                                    default (fsx). A GPR input, otherwise repackaged as-is,
+                                                    is re-encoded at this quality. Fails the conversion for
+                                                    any other output type. */
 
         const char*     preview;                 /* Embedded preview image. NULL or empty: no preview is
                                                     written. The path of a jpg file on disk: that file is
