@@ -54,6 +54,8 @@ public:
 
     string  output_format;
 
+    string  quality;
+
     string  gpmf_path;
 
     string  lens_correction;
@@ -102,6 +104,9 @@ public:
         ("output_format,f",         output_format,        string(""),       "Output file format, overrides the format implied by output file extension \n"
                                                                             "Choices: GPR, DNG. Use to write a GPR encoded file with DNG extension \n"
                                                                             "(DNG format with GPR extension is not allowed)")
+        ("quality",                 quality,              string(""),       "VC-5 encoder quality, only applicable when writing GPR \n"
+                                                                            "Choices: low, medium, high, fs1, [fsx], fs2, ultra (smallest files to highest fidelity) \n"
+                                                                            "A GPR input, otherwise repackaged as-is, is decoded and re-encoded at this quality")
         ("gpmf_path,g",             gpmf_path,            string(""),       "GPMF file path")
 
         ("lens_correction",         lens_correction,      string(""),       "Write a geometric lens-distortion correction (DNG output only) \n"
@@ -217,6 +222,7 @@ int main(int argc, char *argv [])
         convert_params.input_pixel_format      = args.input_pixel_format.c_str();
         convert_params.output_file_path        = args.output_path.c_str();
         convert_params.output_format           = args.output_format.c_str();
+        convert_params.quality                 = args.quality.c_str();
         convert_params.metadata_file_path      = args.apply_metadata.c_str();
         convert_params.gpmf_file_path          = args.gpmf_path.c_str();
         convert_params.lens_correction         = args.lens_correction.c_str();

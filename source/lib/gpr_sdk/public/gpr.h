@@ -29,6 +29,7 @@
 #include "gpr_allocator.h"
 #include "gpr_buffer.h"
 #include "gpr_rgb_buffer.h"
+#include "gpr_vc5_quality.h"
 
 #ifdef __cplusplus
     extern "C" {
@@ -65,6 +66,19 @@
 
             GPR_RGB_RESOLUTION  preview_resolution; /* Resolution of the generated RGB preview (2:1, 4:1, 8:1, 16:1) */
 
+            VC5_ENCODER_QUALITY_SETTING quality; /* VC-5 encoder quality (quantizer table) used whenever the
+                                                    image is encoded to GPR: VC5_ENCODER_QUALITY_SETTING_DEFAULT
+                                                    (Filmscan-X) from gpr_parameters_set_defaults. A value outside
+                                                    the enum fails the conversion. Changes nothing about how a
+                                                    file is read. */
+
+            bool                reencode;       /* gpr_convert_gpr_to_gpr only: decode the input and encode it
+                                                   again (at quality, with the preview settings) instead of
+                                                   repackaging its vc5 bitstream. false from
+                                                   gpr_parameters_set_defaults: a GPR input is repackaged, and
+                                                   re-encoded only when a generated preview needs the encoder.
+                                                   The other conversions always encode and ignore it. */
+
             gpr_exif_info       exif_info;      /* Exif info object */
             
             gpr_profile_info    profile_info;   /* Camera color profile info object */
@@ -79,7 +93,9 @@
 
         void gpr_parameters_destroy(gpr_parameters* x, gpr_free mem_free);
 
-        //!< Fill gpr_parameters from the metadata (EXIF, profile, tuning) of a DNG/GPR file
+        //!< Fill gpr_parameters from the metadata (EXIF, profile, tuning) of a DNG/GPR file.
+        //!< Initialize parameters with gpr_parameters_set_defaults first: what the file does not
+        //!< carry (quality, reencode, the preview settings) keeps whatever the caller left there.
         bool gpr_parameters_parse_dng(const gpr_allocator*      allocator,
                                             gpr_buffer*         inp_dng_buffer,
                                             gpr_parameters*     parameters);
@@ -145,7 +161,7 @@
                                           gpr_buffer*       inp_dng_buffer,
                                           gpr_buffer*       out_gpr_buffer);
 
-        //!< dng to vc5 conversion
+        //!< dng to vc5 conversion (encodes at the default quality; it takes no gpr_parameters)
         bool gpr_convert_dng_to_vc5(const gpr_allocator*    allocator,
                                           gpr_buffer*       inp_dng_buffer,
                                           gpr_buffer*       out_vc5_buffer);
@@ -153,10 +169,10 @@
 
 #if GPR_WRITING && GPR_READING
         //!< gpr to gpr conversion: repackages the input's vc5 bitstream with the caller's
-        //!< metadata, without decoding or re-encoding the image. Falls back to a full decode +
-        //!< re-encode only when an auto-generated preview/thumbnail is requested (enable_preview
-        //!< set without supplying preview_image JPEG bytes), since that thumbnail is produced as
-        //!< a by-product of vc5 encoding.
+        //!< metadata, without decoding or re-encoding the image. Decodes and re-encodes instead
+        //!< when the caller asks for it (reencode) or when an auto-generated preview/thumbnail
+        //!< is requested (enable_preview set without supplying preview_image JPEG bytes), since
+        //!< that thumbnail is produced as a by-product of vc5 encoding.
         bool gpr_convert_gpr_to_gpr(const gpr_allocator*    allocator,
                                     const gpr_parameters*   parameters,
                                           gpr_buffer*       inp_gpr_buffer,
