@@ -85,7 +85,7 @@ plain language, grouped the way it is now, not a changelog of commits.
 |---|---|
 | `source/lib/gpr_sdk/public` | First-party. The public C API (`gpr.h`, `gpr_tuning_info.h`, `gpr_lens_profiles.h`, ...). |
 | `source/lib/gpr_sdk/private` | First-party. Conversion matrix, DNG bridging, the render helpers, the flat write stream, the lens profile table. |
-| `source/lib/common` | First-party. `gpr_platform.h`, the allocator, buffers, log, timer, `jpeg.h`, and the public enums shared with the codec (`gpr_rgb_buffer.h`, `gpr_vc5_quality.h`). |
+| `source/lib/common` | First-party. `gpr_platform.h`, the allocator, buffers, log, timer, `jpeg.h`, and the public types shared with the codec (`gpr_rgb_buffer.h`). |
 | `source/lib/vc5_common`, `vc5_decoder`, `vc5_encoder` | First-party. The codec. NEON kernels are encoder-only. |
 | `source/app/gpr_tools` | First-party. The CLI and `dng_convert_main`, which the test suite also drives. |
 | `source/app/vc5_encoder_app`, `vc5_decoder_app` | First-party upstream samples; kept building, otherwise untouched. |
@@ -196,6 +196,16 @@ injected project-wide by CMake on arm64; that disagreement is deliberate.
 - The cherry-pick rules above hold: shared lines only, documentation and CI
   in separate commits, tests on the CLI layer, verified downstream.
 - **The README "About this fork" section reflects the change.**
+- **The customer API speaks GPR, the codec stays as upstream has it.** Nothing
+  in `source/lib/gpr_sdk/public` exposes a `VC5_*` name, and no codec type
+  moves out of `vc5_encoder.h` / `vc5_decoder.h` to make that possible: a
+  codec header that matches upstream is what lets GoPro absorb a change. When
+  the SDK needs a codec enum, declare its own `GPR_*` enum in the SDK header
+  and tie the two together in `gpr.cpp` with a compile-time check, as
+  `GPR_QUALITY_SETTING` does for `VC5_ENCODER_QUALITY_SETTING` (and as
+  `GPR_PIXEL_FORMAT` stands for `VC5_ENCODER_PIXEL_FORMAT`). `gpr.h` cannot
+  include the codec headers in any case: they exist only when the matching
+  `GPR_READING` / `GPR_WRITING` switch is on.
 - Reuse what exists rather than adding a parallel implementation:
   `gpr_buffer_auto`, `gpr_flat_write_stream`, `read_from_file` /
   `write_to_file`, the `Alloc` / `Create` pairs, `dng_stage1_negative`, and in
