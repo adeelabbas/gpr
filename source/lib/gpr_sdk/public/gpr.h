@@ -29,7 +29,6 @@
 #include "gpr_allocator.h"
 #include "gpr_buffer.h"
 #include "gpr_rgb_buffer.h"
-#include "gpr_vc5_quality.h"
 
 #ifdef __cplusplus
     extern "C" {
@@ -42,6 +41,26 @@
 
         } gpr_preview_image;
       
+        /* Quality of a GPR encode: which quantizer table is applied to the wavelet highpass
+           bands, from the smallest files (LOW) to the highest fidelity (ULTRA). The levels are
+           those of the VC-5 encoder (VC5_ENCODER_QUALITY_SETTING in vc5_encoder.h) under the
+           SDK's own names, with identical values: gpr.cpp checks that at compile time. */
+        typedef enum
+        {
+            GPR_QUALITY_SETTING_LOW,                           // Low (smallest files)
+            GPR_QUALITY_SETTING_MEDIUM,                        // Medium
+            GPR_QUALITY_SETTING_HIGH,                          // High
+            GPR_QUALITY_SETTING_FS1,                           // Film Scan 1
+            GPR_QUALITY_SETTING_FSX,                           // Film Scan X
+            GPR_QUALITY_SETTING_FS2,                           // Film Scan 2
+            GPR_QUALITY_SETTING_ULTRA,                         // Ultra (largest files, highest fidelity)
+
+            GPR_QUALITY_SETTING_COUNT,
+
+            GPR_QUALITY_SETTING_DEFAULT = GPR_QUALITY_SETTING_FSX,
+
+        } GPR_QUALITY_SETTING;
+
         typedef struct
         {
             unsigned int        input_width;                   /* Width of input source in pixels (only applies to raw input) */
@@ -66,11 +85,10 @@
 
             GPR_RGB_RESOLUTION  preview_resolution; /* Resolution of the generated RGB preview (2:1, 4:1, 8:1, 16:1) */
 
-            VC5_ENCODER_QUALITY_SETTING quality; /* VC-5 encoder quality (quantizer table) used whenever the
-                                                    image is encoded to GPR: VC5_ENCODER_QUALITY_SETTING_DEFAULT
-                                                    (Filmscan-X) from gpr_parameters_set_defaults. A value outside
-                                                    the enum fails the conversion. Changes nothing about how a
-                                                    file is read. */
+            GPR_QUALITY_SETTING quality;        /* Quality used whenever the image is encoded to GPR:
+                                                   GPR_QUALITY_SETTING_DEFAULT (Film Scan X) from
+                                                   gpr_parameters_set_defaults. A value outside the enum fails
+                                                   the conversion. Changes nothing about how a file is read. */
 
             bool                reencode;       /* gpr_convert_gpr_to_gpr only: decode the input and encode it
                                                    again (at quality, with the preview settings) instead of

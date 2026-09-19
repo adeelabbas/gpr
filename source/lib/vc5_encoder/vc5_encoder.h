@@ -23,7 +23,6 @@
 #include "types.h"
 #include "gpr_buffer.h"
 #include "gpr_rgb_buffer.h"
-#include "gpr_vc5_quality.h"
 #include "rgb.h"
 #include "vc5_common.h"
 
@@ -54,7 +53,24 @@
         
     } VC5_ENCODER_PIXEL_FORMAT;
 
-    // VC5_ENCODER_QUALITY_SETTING is declared in gpr_vc5_quality.h, shared with the SDK API.
+    /*!
+     @brief Quality setting of the VC5 encoder
+     */
+    typedef enum
+    {
+        VC5_ENCODER_QUALITY_SETTING_LOW         = 0,		// Low (Lowest Quality)
+        VC5_ENCODER_QUALITY_SETTING_MEDIUM      = 1,		// Medium
+        VC5_ENCODER_QUALITY_SETTING_HIGH        = 2,		// High
+        VC5_ENCODER_QUALITY_SETTING_FS1         = 3,		// Film Scan 1
+        VC5_ENCODER_QUALITY_SETTING_FSX         = 4,		// Film Scan X
+        VC5_ENCODER_QUALITY_SETTING_FS2         = 5,		// Film Scan 2 (Highest Quality)
+        VC5_ENCODER_QUALITY_SETTING_ULTRA       = 6,        // Ultra (finer than Film Scan 2: largest files, highest fidelity)
+        
+        VC5_ENCODER_QUALITY_SETTING_COUNT       = 7,
+        
+        VC5_ENCODER_QUALITY_SETTING_DEFAULT     = VC5_ENCODER_QUALITY_SETTING_FSX,
+        
+    } VC5_ENCODER_QUALITY_SETTING;
 
     /*!
      @brief vc5 encoder parameters

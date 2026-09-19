@@ -131,23 +131,23 @@ static unsigned int pixel_format_get_bits(GPR_PIXEL_FORMAT p)
 // diagnostic both read this table.
 static const struct
 {
-    const char*                 name;
-    VC5_ENCODER_QUALITY_SETTING level;
+    const char*         name;
+    GPR_QUALITY_SETTING level;
 
 } quality_levels[] =
 {
-    { "low",    VC5_ENCODER_QUALITY_SETTING_LOW    },
-    { "medium", VC5_ENCODER_QUALITY_SETTING_MEDIUM },
-    { "high",   VC5_ENCODER_QUALITY_SETTING_HIGH   },
-    { "fs1",    VC5_ENCODER_QUALITY_SETTING_FS1    },
-    { "fsx",    VC5_ENCODER_QUALITY_SETTING_FSX    },
-    { "fs2",    VC5_ENCODER_QUALITY_SETTING_FS2    },
-    { "ultra",  VC5_ENCODER_QUALITY_SETTING_ULTRA  },
+    { "low",    GPR_QUALITY_SETTING_LOW    },
+    { "medium", GPR_QUALITY_SETTING_MEDIUM },
+    { "high",   GPR_QUALITY_SETTING_HIGH   },
+    { "fs1",    GPR_QUALITY_SETTING_FS1    },
+    { "fsx",    GPR_QUALITY_SETTING_FSX    },
+    { "fs2",    GPR_QUALITY_SETTING_FS2    },
+    { "ultra",  GPR_QUALITY_SETTING_ULTRA  },
 };
 
 // Maps a --quality level name (any case, like the other option values) to its enum.
 // Returns 1 on match, 0 otherwise.
-static int parse_quality( const char* s, VC5_ENCODER_QUALITY_SETTING* out )
+static int parse_quality( const char* s, GPR_QUALITY_SETTING* out )
 {
     size_t i;
 

@@ -1698,12 +1698,12 @@ static void run_quality_cli_tests()
         return;
     }
 
-    run_case( "quality defaults: one enum, encoder default Filmscan-X, SDK parameters follow it", []{
-        check( VC5_ENCODER_QUALITY_SETTING_DEFAULT == VC5_ENCODER_QUALITY_SETTING_FSX, "encoder default is Filmscan-X" );
+    run_case( "quality defaults: Film Scan X, and no re-encode, from gpr_parameters_set_defaults", []{
+        check( GPR_QUALITY_SETTING_DEFAULT == GPR_QUALITY_SETTING_FSX, "the default level is Film Scan X" );
 
         gpr_parameters params;
         gpr_parameters_set_defaults( &params );
-        check( params.quality == VC5_ENCODER_QUALITY_SETTING_DEFAULT, "gpr_parameters_set_defaults gives the encoder default" );
+        check( params.quality == GPR_QUALITY_SETTING_DEFAULT, "gpr_parameters_set_defaults gives the default level" );
         check( params.reencode == false, "gpr_parameters_set_defaults does not ask for a re-encode" );
         gpr_parameters_destroy( &params, g_alloc.Free );
     });
