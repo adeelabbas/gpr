@@ -2358,6 +2358,69 @@ bool gpr_convert_dng_to_vc5(const gpr_allocator*    allocator,
 
 #endif // GPR_WRITING
 
+#if GPR_WRITING && GPR_READING
+// Repackages the input's vc5 bitstream in a new GPR container with the caller's metadata,
+// avoiding the vc5 decode/re-encode entirely. The auto-generated thumbnail is a by-product
+// of running the vc5 encoder, so when the caller requests a preview without supplying the
+// JPEG bytes (enable_preview set, preview_image empty) the input is decoded and re-encoded
+// from scratch instead.
+bool gpr_convert_gpr_to_gpr(const gpr_allocator*    allocator,
+                            const gpr_parameters*   parameters,
+                                  gpr_buffer*       inp_gpr_buffer,
+                                  gpr_buffer*       out_gpr_buffer)
+{
+    TIMESTAMP("[BEG]", 2)
+
+    bool needs_encoded_thumbnail = false;
+
+#if GPR_JPEG_AVAILABLE
+    needs_encoded_thumbnail = parameters->enable_preview &&
+        parameters->preview_resolution != GPR_RGB_RESOLUTION_NONE &&
+        ( parameters->preview_image.jpg_preview.buffer == NULL ||
+          parameters->preview_image.jpg_preview.size == 0 );
+#endif
+
+    if( needs_encoded_thumbnail == false )
+    {
+        gpr_buffer vc5_buffer = { NULL, 0 };
+
+        if( gpr_convert_gpr_to_vc5( allocator, inp_gpr_buffer, &vc5_buffer ) )
+        {
+            bool ok = gpr_convert_vc5_to_gpr( allocator, parameters, &vc5_buffer, out_gpr_buffer );
+
+            allocator->Free( vc5_buffer.buffer );
+
+            TIMESTAMP("[END]", 1)
+
+            return ok;
+        }
+
+        // No vc5 bitstream found (e.g. the input is an uncompressed DNG): fall through to
+        // the decode + encode path below.
+    }
+
+    gpr_buffer_auto raw_buffer(allocator->Alloc, allocator->Free);
+
+    // Read-only view over the caller's buffer - no copy of the input file
+    dng_stream inp_gpr_stream( inp_gpr_buffer->buffer, (uint32)inp_gpr_buffer->size );
+
+    if( read_dng( allocator, &inp_gpr_stream, &raw_buffer, NULL, NULL, NULL ) == false )
+    {
+        assert(0); return false;
+    }
+
+    dng_memory_stream out_gpr_stream( gDefaultDNGMemoryAllocator );
+
+    write_dng( allocator, &out_gpr_stream, &raw_buffer, true, NULL, parameters );
+
+    write_dngstream_to_buffer( &out_gpr_stream, out_gpr_buffer, allocator->Alloc, allocator->Free );
+
+    TIMESTAMP("[END]", 1)
+
+    return true;
+}
+#endif // GPR_WRITING && GPR_READING
+
 #if GPR_READING
 
 bool gpr_convert_gpr_to_rgb(const gpr_allocator*        allocator,

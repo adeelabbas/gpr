@@ -151,6 +151,17 @@
                                           gpr_buffer*       out_vc5_buffer);
 #endif // GPR_WRITING
 
+#if GPR_WRITING && GPR_READING
+        //!< gpr to gpr conversion: repackages the input's vc5 bitstream with the caller's
+        //!< metadata, without decoding or re-encoding the image. Falls back to a full decode +
+        //!< re-encode only when an auto-generated preview/thumbnail is requested (enable_preview
+        //!< set without supplying preview_image JPEG bytes), since that thumbnail is produced as
+        //!< a by-product of vc5 encoding.
+        bool gpr_convert_gpr_to_gpr(const gpr_allocator*    allocator,
+                                    const gpr_parameters*   parameters,
+                                          gpr_buffer*       inp_gpr_buffer,
+                                          gpr_buffer*       out_gpr_buffer);
+#endif // GPR_WRITING && GPR_READING
 
 #if GPR_READING
 
