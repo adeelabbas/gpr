@@ -56,6 +56,8 @@
 #include "gpr_buffer_auto.h"
 #include "gpr_rgb.h"
 
+#include "dng_stage1_negative.h"
+
 #if GPR_READING
 #include "vc5_decoder.h"
 #endif
@@ -894,7 +896,8 @@ static bool read_dng(const gpr_allocator*       allocator,
                            gpr_buffer_auto*     raw_image_buffer,
                            gpr_buffer_auto*     vc5_image_buffer,
                            gpr_parameters*      convert_params = NULL,
-                           bool*                is_vc5_format = NULL )
+                           bool*                is_vc5_format = NULL,
+                           AutoPtr<dng_image>*  out_decoded_image = NULL )
 {
     dng_host host;
     
@@ -919,6 +922,8 @@ static bool read_dng(const gpr_allocator*       allocator,
     host.SetKeepOriginalFile (false);
     
     AutoPtr<dng_negative> negative;
+
+    bool stage1_read = false;
 
     if( raw_image_buffer != NULL && vc5_image_buffer == NULL )
     {
@@ -950,7 +955,7 @@ static bool read_dng(const gpr_allocator*       allocator,
             }
         }
         
-        negative.Reset (host.Make_dng_negative ());
+        negative.Reset (dng_stage1_negative::Make (host));
         
         negative->Parse (host, *dng_read_stream, info);
         
@@ -992,6 +997,8 @@ static bool read_dng(const gpr_allocator*       allocator,
 #endif
         {
             negative->ReadStage1Image (host, *dng_read_stream, info);
+
+            stage1_read = true;
 
             if( is_vc5_format )
                 *is_vc5_format = false;
@@ -1267,7 +1274,16 @@ static bool read_dng(const gpr_allocator*       allocator,
             }
         }
 
-        if( raw_image_buffer )
+
+        // When the caller can take the decoded image directly (and no crop applies, so the
+        // image is the full raw exactly as a flattened buffer would have been), hand over
+        // ownership instead of flattening - this skips a full-frame pixel copy. After the
+        // detach, negative->RawImage() must not be called again.
+        if( out_decoded_image && stage1_read && have_crop == false )
+        {
+            out_decoded_image->Reset( static_cast<dng_stage1_negative*>( negative.Get() )->DetachStage1Image() );
+        }
+        else if( raw_image_buffer )
         {
             CopyRawImageToBuffer( raw_image, *raw_image_buffer, have_crop ? &crop_rect : NULL );
         }
@@ -1281,7 +1297,8 @@ static void write_dng(const gpr_allocator*          allocator,
                       const gpr_buffer_auto*        raw_image_buffer,
                             bool                    compress_raw_to_vc5,
                             gpr_buffer_auto*        vc5_image_buffer,
-                      const gpr_parameters*   	    convert_params )
+                      const gpr_parameters*   	    convert_params,
+                            AutoPtr<dng_image>*     prebuilt_raw_image = NULL )
 {
     gpr_profile_info* profile_info  = (gpr_profile_info *) &convert_params->profile_info;
     const gpr_exif_info*    exif_info     = &convert_params->exif_info;
@@ -1307,7 +1324,23 @@ static void write_dng(const gpr_allocator*          allocator,
     host.SetSaveLinearDNG(false);
     host.SetKeepOriginalFile(true);
     
-    AutoPtr<dng_image> image(new dng_simple_image(rect, 1, ttShort, memalloc));
+    // A prebuilt image (decoded by read_dng and handed over without flattening) replaces both
+    // the fresh allocation here and the CopyBufferToRawImage fill below. Callers only pass one
+    // for uncompressed output; the vc5 encoder reads from the flat buffer, not the image.
+    const bool use_prebuilt = prebuilt_raw_image != NULL &&
+                              prebuilt_raw_image->Get() != NULL &&
+                              vc5_dng == false;
+
+    AutoPtr<dng_image> image;
+
+    if( use_prebuilt )
+    {
+        image.Reset( prebuilt_raw_image->Release() );
+    }
+    else
+    {
+        image.Reset( new dng_simple_image(rect, 1, ttShort, memalloc) );
+    }
     
     gpr_buffer_auto raw_allocated_buffer( allocator->Alloc, allocator->Free );
 
@@ -1371,7 +1404,7 @@ static void write_dng(const gpr_allocator*          allocator,
     
     if( ( convert_params->tuning_info.pixel_format == PIXEL_FORMAT_GBRG_12P ||
           convert_params->tuning_info.pixel_format == PIXEL_FORMAT_RGGB_12P ) &&
-          vc5_dng == false )
+          vc5_dng == false && use_prebuilt == false )
     {
         unpack_pixel_format( raw_image_buffer, convert_params, &raw_allocated_buffer );
         
@@ -1417,7 +1450,7 @@ static void write_dng(const gpr_allocator*          allocator,
         }
     }
 
-    if( vc5_dng == false )
+    if( vc5_dng == false && use_prebuilt == false )
     {
         CopyBufferToRawImage( *raw_image_buffer, input_pitch / sizeof(short), *(image.Get()) );
     }
@@ -2034,16 +2067,48 @@ bool gpr_convert_dng_to_dng(const gpr_allocator*    allocator,
     // Read-only view over the caller's buffer - no copy of the input file
     dng_stream inp_dng_stream( inp_dng_buffer->buffer, (uint32)inp_dng_buffer->size );
 
-    if( read_dng( allocator, &inp_dng_stream, &raw_buffer, NULL ) == false )
+    // Fast path: hand the decoded image straight to write_dng, skipping the flatten/refill
+    // pixel copies. Only possible when the flat buffer isn't needed along the way: no Bayer
+    // phase shift (which is pointer arithmetic on the flat buffer) and no 12P repacking.
+    const bool want_fast = parameters->input_skip_rows == 0 &&
+                           parameters->input_skip_cols == 0 &&
+                           parameters->tuning_info.pixel_format != PIXEL_FORMAT_RGGB_12P &&
+                           parameters->tuning_info.pixel_format != PIXEL_FORMAT_GBRG_12P;
+
+    AutoPtr<dng_image> decoded_image;
+
+    if( read_dng( allocator, &inp_dng_stream, &raw_buffer, NULL, NULL, NULL,
+                  want_fast ? &decoded_image : NULL ) == false )
     {
         assert(0); return false;
+    }
+
+    // The decoded image must match what write_dng would have built from the flat buffer;
+    // read_dng already withholds it when a crop applies, so a mismatch here only means the
+    // caller's parameters disagree with the file - rebuild the legacy flat buffer and fall back.
+    const bool fast = decoded_image.Get() != NULL &&
+                      decoded_image->Planes() == 1 &&
+                      decoded_image->PixelType() == ttShort &&
+                      decoded_image->Bounds() == dng_rect( parameters->input_height, parameters->input_width );
+
+    if( fast == false && decoded_image.Get() != NULL )
+    {
+        CopyRawImageToBuffer( *decoded_image.Get(), raw_buffer, NULL );
+        decoded_image.Reset();
     }
 
     gpr_buffer_auto shifted_copy(allocator->Alloc, allocator->Free);
 
     dng_memory_stream out_dng_stream( gDefaultDNGMemoryAllocator );
 
-    write_dng( allocator, &out_dng_stream, adjust_bayer_phase( parameters, &raw_buffer, &shifted_copy ), false, NULL, parameters );
+    if( fast )
+    {
+        write_dng( allocator, &out_dng_stream, NULL, false, NULL, parameters, &decoded_image );
+    }
+    else
+    {
+        write_dng( allocator, &out_dng_stream, adjust_bayer_phase( parameters, &raw_buffer, &shifted_copy ), false, NULL, parameters );
+    }
 
     write_dngstream_to_buffer( &out_dng_stream, out_dng_buffer, allocator->Alloc, allocator->Free );
 
