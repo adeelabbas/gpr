@@ -1294,21 +1294,97 @@ static void write_dng(const gpr_allocator*          allocator,
         {
             dng_opcode_list &opcodelist2 =  negative->OpcodeList2 ();
 
-            dng_stream gain_map_stream0 (tuning_info->gain_map.buffers[0], gain_map_size);
-            AutoPtr<dng_opcode> gain_map_opcode0 ( new dng_opcode_GainMap ( host, gain_map_stream0 ));
-            opcodelist2.Append( gain_map_opcode0 );
+            // Apple ImageIO/CIRAWFilter ignores the whole OpcodeList2 gain map unless the
+            // two green CFA planes carry byte-identical gains ("Gain Map will be ignored
+            // because of mismatch in green channels"); GoPro's factory maps differ between
+            // the greens only by float16 quantization noise (<0.4%). Write the first
+            // green's gain values into both green opcodes. Each opcode keeps its own area
+            // spec (CFA plane origin); only the gain samples are shared. Done at DNG-write
+            // time only, so the GPR-side buffers round-trip untouched.
+            //
+            // Which two of the four are the greens comes from each opcode's own area spec -
+            // the (top,left) parity names its cell in the 2x2 CFA tile - never from its
+            // position in the list: the buffers are stored in whatever order the source
+            // file's OpcodeList2 used, which need not be CFA raster order. HERO13 GBRG
+            // files store them R,G,G,B, so an index guess picks red and blue instead,
+            // overwriting blue's shading with red's and leaving the greens mismatched -
+            // Apple then drops all four maps and the corners stay ~36% dark.
+            //
+            // Greens sit on the CFA tile's main diagonal for patterns that begin with
+            // green, on the anti-diagonal for the rest.
+            bool greens_on_main_diagonal;
+            switch ( tuning_info->pixel_format )
+            {
+                case PIXEL_FORMAT_GBRG_12:      // G B / R G
+                case PIXEL_FORMAT_GBRG_12P:
+                    greens_on_main_diagonal = true;
+                    break;
+                default:                        // RGGB: R G / G B,  BGGR: B G / G R
+                    greens_on_main_diagonal = false;
+                    break;
+            }
 
-            dng_stream gain_map_stream1 (tuning_info->gain_map.buffers[1], gain_map_size);
-            AutoPtr<dng_opcode> gain_map_opcode1 ( new dng_opcode_GainMap ( host, gain_map_stream1 ));
-            opcodelist2.Append( gain_map_opcode1 );
+            int greens[4];
+            int green_count = 0;
 
-            dng_stream gain_map_stream2 (tuning_info->gain_map.buffers[2], gain_map_size);
-            AutoPtr<dng_opcode> gain_map_opcode2 ( new dng_opcode_GainMap ( host, gain_map_stream2 ));
-            opcodelist2.Append( gain_map_opcode2 );
+            for ( int i = 0; i < 4; i++ )
+            {
+                // Read the area spec back through dng_stream - the same reader that turns
+                // these buffers into opcodes below - so the byte order matches whatever
+                // the writing side used, by construction.
+                dng_stream area_stream ( tuning_info->gain_map.buffers[i], gain_map_size );
 
-            dng_stream gain_map_stream3 (tuning_info->gain_map.buffers[3], gain_map_size);
-            AutoPtr<dng_opcode> gain_map_opcode3 ( new dng_opcode_GainMap ( host, gain_map_stream3 ));
-            opcodelist2.Append( gain_map_opcode3 );
+                area_stream.Get_uint32();       // version
+                area_stream.Get_uint32();       // flags
+                area_stream.Get_uint32();       // opcode data size
+
+                const int32 area_top  = area_stream.Get_int32();
+                const int32 area_left = area_stream.Get_int32();
+
+                if ( ( ( area_top & 1 ) == ( area_left & 1 ) ) == greens_on_main_diagonal )
+                {
+                    greens[green_count++] = i;
+                }
+            }
+
+            // Serialized buffer layout (mirrors the read code above): version(4) + flags(4)
+            // + opcode data size(4) + dng_area_spec(32) + gain map header(44); the gain
+            // samples run from there to the end of the buffer.
+            const size_t gain_data_offset = 4 + 4 + 4 + dng_area_spec::kDataSize + 44;
+            const size_t map_header_offset = gain_data_offset - 44;
+
+            // Only share gains when the area specs named exactly two greens and both
+            // describe the same map geometry (points, spacing, origin, planes); otherwise
+            // the sample counts could differ. Anything unexpected writes the four maps
+            // through untouched rather than guessing at them.
+            const bool share_green_gains =
+                green_count == 2 &&
+                gain_map_size > gain_data_offset &&
+                memcmp( tuning_info->gain_map.buffers[greens[0]] + map_header_offset,
+                        tuning_info->gain_map.buffers[greens[1]] + map_header_offset, 44 ) == 0;
+
+            const int green_b = share_green_gains ? greens[1] : -1;
+
+            std::vector<char> green_b_buffer;
+
+            if ( share_green_gains )
+            {
+                green_b_buffer.assign( tuning_info->gain_map.buffers[green_b],
+                                       tuning_info->gain_map.buffers[green_b] + gain_map_size );
+
+                memcpy( &green_b_buffer[gain_data_offset],
+                        tuning_info->gain_map.buffers[greens[0]] + gain_data_offset,
+                        gain_map_size - gain_data_offset );
+            }
+
+            for ( int i = 0; i < 4; i++ )
+            {
+                const char* buffer = ( i == green_b ) ? &green_b_buffer[0] : tuning_info->gain_map.buffers[i];
+
+                dng_stream gain_map_stream ( buffer, gain_map_size );
+                AutoPtr<dng_opcode> gain_map_opcode ( new dng_opcode_GainMap ( host, gain_map_stream ));
+                opcodelist2.Append( gain_map_opcode );
+            }
         }
 
        // WarpRectilinear - aka chromatic aberration correction (applied after demosaicking (OpcodeList3))
