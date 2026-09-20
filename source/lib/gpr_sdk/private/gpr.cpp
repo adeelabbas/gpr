@@ -892,13 +892,68 @@ static void read_warp_rectilinear_opcode( dng_opcode &opcode, gpr_warp_rectiline
     }
 }
 
+// The parameters to write with, once a preview has been found for a conversion that carried
+// none of its own: `parameters` unchanged when there is nothing to attach, otherwise `scratch`
+// - a shallow copy carrying the JPEG, owning nothing. preview_jpg keeps ownership, and has to
+// outlive the write.
+static const gpr_parameters* attach_preview( const gpr_parameters*  parameters,
+                                                   gpr_parameters*  scratch,
+                                             const gpr_buffer_auto* preview_jpg )
+{
+    if( parameters->preview_image.jpg_preview.buffer != NULL || preview_jpg->is_valid() == false )
+        return parameters;
+
+    *scratch = *parameters;
+    scratch->preview_image.jpg_preview.buffer = preview_jpg->get_buffer();
+    scratch->preview_image.jpg_preview.size   = preview_jpg->get_size();
+
+    return scratch;
+}
+
+// The file's embedded JPEG thumbnail, copied out of whichever IFD holds it, for a conversion
+// that would rather carry the preview across than decode a new one. Any JPEG-compressed IFD
+// that is not the raw one qualifies; in a DNG that is IFD 0. Leaves the buffer empty when the
+// file has no preview - which is every GPR straight off a GoPro.
+static void read_preview_jpg( dng_info& info, dng_stream& stream, gpr_buffer_auto* out_preview_jpg )
+{
+    for( uint32 i = 0; i < info.fIFDCount; i++ )
+    {
+        const dng_ifd* ifd = info.fIFD[i].Get();
+
+        if( ifd == NULL || (int32)i == info.fMainIndex )
+            continue;
+
+        if( ( ifd->fCompression != ccJPEG && ifd->fCompression != ccOldJPEG ) ||
+            ifd->fTileOffsetsCount != 1 || ifd->fTileByteCount[0] == 0 )
+        {
+            continue;
+        }
+
+        // A strip that runs past the end of the file is a malformed input, not a preview;
+        // reading it would throw out of a call whose callers expect a bool.
+        if( ifd->fTileOffset[0] + ifd->fTileByteCount[0] > stream.Length() )
+            continue;
+
+        out_preview_jpg->allocate( ifd->fTileByteCount[0] );
+
+        if( out_preview_jpg->is_valid() )
+        {
+            stream.SetReadPosition( ifd->fTileOffset[0] );
+            stream.Get( out_preview_jpg->get_buffer(), ifd->fTileByteCount[0] );
+        }
+
+        return;
+    }
+}
+
 static bool read_dng(const gpr_allocator*       allocator,
                            dng_stream*          dng_read_stream,
                            gpr_buffer_auto*     raw_image_buffer,
                            gpr_buffer_auto*     vc5_image_buffer,
                            gpr_parameters*      convert_params = NULL,
                            bool*                is_vc5_format = NULL,
-                           AutoPtr<dng_image>*  out_decoded_image = NULL )
+                           AutoPtr<dng_image>*  out_decoded_image = NULL,
+                           gpr_buffer_auto*     out_preview_jpg = NULL )
 {
     dng_host host;
     
@@ -941,6 +996,11 @@ static bool read_dng(const gpr_allocator*       allocator,
         if (!info.IsValidDNG ())
         {
             return false;
+        }
+
+        if( out_preview_jpg != NULL )
+        {
+            read_preview_jpg( info, *dng_read_stream, out_preview_jpg );
         }
 
         dng_memory_block* gpmf_payload = host.GetGPMFPayload().Get();
@@ -2078,11 +2138,19 @@ bool gpr_convert_dng_to_dng(const gpr_allocator*    allocator,
 
     AutoPtr<dng_image> decoded_image;
 
+    // Carry the input's thumbnail across: this rewrite exists to change metadata, and dropping
+    // the preview would change how every reader shows the file (see write_dng). Nothing is
+    // decoded or re-encoded - the JPEG the input already carries is copied through.
+    gpr_buffer_auto preview_jpg(allocator->Alloc, allocator->Free);
+    gpr_parameters  preview_params;
+
     if( read_dng( allocator, &inp_dng_stream, &raw_buffer, NULL, NULL, NULL,
-                  want_fast ? &decoded_image : NULL ) == false )
+                  want_fast ? &decoded_image : NULL, &preview_jpg ) == false )
     {
         assert(0); return false;
     }
+
+    parameters = attach_preview( parameters, &preview_params, &preview_jpg );
 
     // The decoded image must match what write_dng would have built from the flat buffer;
     // read_dng already withholds it when a crop applies, so a mismatch here only means the
@@ -2454,6 +2522,47 @@ bool gpr_convert_gpr_to_jpg(const gpr_allocator*        allocator,
 #endif
 }
 
+// A thumbnail for the plain-DNG path to embed (see write_dng), decoded from the source at
+// preview_resolution. Costs one reduced-resolution decode, so callers opt in by setting it.
+//
+// The same decode and encode gpr_convert_gpr_to_jpg makes, so the thumbnail matches the JPGs
+// taken of the same file, but at EXIF orientation 1 rather than the source's: the DNG's own
+// Orientation tag already covers everything in the file, thumbnail included, and a second one
+// here would turn a rotated shot twice.
+static bool decode_preview_jpg(const gpr_allocator*    allocator,
+                               const gpr_parameters*   parameters,
+                                     gpr_buffer*       inp_gpr_buffer,
+                                     gpr_buffer_auto*  out_jpg_buffer)
+{
+#if GPR_READING && GPR_JPEG_AVAILABLE
+    gpr_rgb_buffer  rgb_buffer = { NULL, 0, 0, 0 };
+    gpr_buffer      jpg_buffer = { NULL, 0 };
+    bool            ok;
+
+    if( parameters->enable_preview == false ||
+        parameters->preview_resolution == GPR_RGB_RESOLUTION_NONE ||
+        gpr_convert_gpr_to_rgb( allocator, parameters->preview_resolution, 8,
+                                inp_gpr_buffer, &rgb_buffer ) == false )
+    {
+        return false;
+    }
+
+    ok = gpr_encode_rgb_to_jpg( allocator, (const unsigned char*)rgb_buffer.buffer,
+                                (int)rgb_buffer.width, (int)rgb_buffer.height,
+                                2, 1, &jpg_buffer );
+
+    allocator->Free( rgb_buffer.buffer );
+
+    if( ok )
+        out_jpg_buffer->set( jpg_buffer.buffer, jpg_buffer.size, true );
+
+    return ok;
+#else
+    (void)allocator; (void)parameters; (void)inp_gpr_buffer; (void)out_jpg_buffer;
+    return false;
+#endif
+}
+
 bool gpr_convert_gpr_to_dng(const gpr_allocator*    allocator,
                             const gpr_parameters*   parameters,
                                   gpr_buffer*       inp_gpr_buffer,
@@ -2469,14 +2578,26 @@ bool gpr_convert_gpr_to_dng(const gpr_allocator*    allocator,
         // Read-only view over the caller's buffer - no copy of the input file
         dng_stream inp_gpr_stream( inp_gpr_buffer->buffer, (uint32)inp_gpr_buffer->size );
 
-        if( read_dng( allocator, &inp_gpr_stream, &raw_buffer, &vc5_buffer, NULL ) == false )
+        // The thumbnail to embed (see write_dng): the one the input already carries, when it
+        // has one - cheaper than decoding, and closer to what the source looks like -
+        // otherwise one decoded below. GoPro cameras write no preview, so in practice the read
+        // finds one only for a DNG that has been through this conversion before, or a raw from
+        // something else (an iPhone DNG carries its rendered frame here).
+        gpr_buffer_auto preview_jpg(allocator->Alloc, allocator->Free);
+        gpr_parameters  preview_params;
+
+        if( read_dng( allocator, &inp_gpr_stream, &raw_buffer, &vc5_buffer, NULL, NULL, NULL, &preview_jpg ) == false )
         {
             return false;
         }
 
+        if( preview_jpg.is_valid() == false )
+            decode_preview_jpg( allocator, parameters, inp_gpr_buffer, &preview_jpg );
+
         dng_memory_stream out_dng_stream( gDefaultDNGMemoryAllocator );
 
-        write_dng( allocator, &out_dng_stream, &raw_buffer, false, NULL, parameters );
+        write_dng( allocator, &out_dng_stream, &raw_buffer, false, NULL,
+                   attach_preview( parameters, &preview_params, &preview_jpg ) );
 
         write_dngstream_to_buffer( &out_dng_stream, out_dng_buffer, allocator->Alloc, allocator->Free );
     }
