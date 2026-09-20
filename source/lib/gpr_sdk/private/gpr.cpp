@@ -2305,24 +2305,55 @@ bool gpr_convert_dng_to_vc5(const gpr_allocator*    allocator,
 
     gpr_buffer_auto raw_buffer(allocator->Alloc, allocator->Free);
     gpr_buffer_auto vc5_buffer(allocator->Alloc, allocator->Free);
-    
-    dng_memory_stream inp_dng_stream( gDefaultDNGMemoryAllocator );
-    inp_dng_stream.Put( inp_dng_buffer->buffer, inp_dng_buffer->size );
-    inp_dng_stream.SetReadPosition(0);
-    
-    if( read_dng( allocator, &inp_dng_stream, &raw_buffer, NULL ) == false )
+    gpr_parameters  params;
+    bool            is_vc5_format = false;
+
+    gpr_parameters_set_defaults( &params );
+
     {
-        assert(0); return false;
+        // Read-only view over the caller's buffer - no copy of the input file
+        dng_stream inp_dng_stream( inp_dng_buffer->buffer, (uint32)inp_dng_buffer->size );
+
+        // Decode the raw image and read the metadata; also extract the vc5 bitstream if the
+        // input DNG is already vc5-compressed (i.e. a GPR).
+        if( read_dng( allocator, &inp_dng_stream, &raw_buffer, &vc5_buffer, &params, &is_vc5_format ) == false )
+        {
+            assert(0);
+            gpr_parameters_destroy( &params, allocator->Free );
+            return false;
+        }
     }
-    
-    out_vc5_buffer->buffer = allocator->Alloc( vc5_buffer.get_size() );
-    out_vc5_buffer->size = vc5_buffer.get_size();
-    
-    memcpy(out_vc5_buffer->buffer, vc5_buffer.get_buffer(), vc5_buffer.get_size() );
-    
+
+    bool ok = true;
+
+    if( is_vc5_format && vc5_buffer.is_valid() )
+    {
+        // Input already carried a vc5 bitstream -- return it directly.
+        out_vc5_buffer->buffer = allocator->Alloc( vc5_buffer.get_size() );
+        out_vc5_buffer->size   = vc5_buffer.get_size();
+        memcpy( out_vc5_buffer->buffer, vc5_buffer.get_buffer(), vc5_buffer.get_size() );
+    }
+    else
+    {
+        // Uncompressed DNG: encode the decoded raw to a GPR, then extract its vc5 bitstream.
+        // (The previous implementation never ran the encoder and returned an empty buffer.)
+        gpr_buffer raw_image = { raw_buffer.get_buffer(), raw_buffer.get_size() };
+        gpr_buffer gpr_image = { NULL, 0 };
+
+        ok = gpr_convert_raw_to_gpr( allocator, &params, &raw_image, &gpr_image );
+
+        if( ok )
+            ok = gpr_convert_gpr_to_vc5( allocator, &gpr_image, out_vc5_buffer );
+
+        if( gpr_image.buffer )
+            allocator->Free( gpr_image.buffer );
+    }
+
+    gpr_parameters_destroy( &params, allocator->Free );
+
     TIMESTAMP("[END]", 1)
 
-    return true;
+    return ok;
 }
 
 #endif // GPR_WRITING
