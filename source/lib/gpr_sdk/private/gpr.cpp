@@ -1722,13 +1722,20 @@ bool gpr_convert_gpr_to_rgb(const gpr_allocator*        allocator,
 
     gpr_buffer_auto vc5_buffer(allocator->Alloc, allocator->Free);
 
-    dng_memory_stream inp_gpr_stream( gDefaultDNGMemoryAllocator );
-    inp_gpr_stream.Put( inp_gpr_buffer->buffer, inp_gpr_buffer->size );
-    inp_gpr_stream.SetReadPosition(0);
-    
-    if( read_dng( allocator, &inp_gpr_stream, NULL, &vc5_buffer, &params ) == false )
+    try
     {
-        assert(0); return false;
+        dng_memory_stream inp_gpr_stream( gDefaultDNGMemoryAllocator );
+        inp_gpr_stream.Put( inp_gpr_buffer->buffer, inp_gpr_buffer->size );
+        inp_gpr_stream.SetReadPosition(0);
+
+        if( read_dng( allocator, &inp_gpr_stream, NULL, &vc5_buffer, &params ) == false )
+        {
+            return false;
+        }
+    }
+    catch( ... ) // the DNG SDK throws dng_exception on malformed input; C callers expect false
+    {
+        return false;
     }
 
     if( vc5_buffer.is_valid() == false )
@@ -1771,24 +1778,31 @@ bool gpr_convert_gpr_to_dng(const gpr_allocator*    allocator,
 {
     TIMESTAMP("[BEG]", 2)
 
-    gpr_buffer_auto raw_buffer(allocator->Alloc, allocator->Free);
-    gpr_buffer_auto vc5_buffer(allocator->Alloc, allocator->Free);
-    
-    dng_memory_stream inp_gpr_stream( gDefaultDNGMemoryAllocator );
-    inp_gpr_stream.Put( inp_gpr_buffer->buffer, inp_gpr_buffer->size );
-    inp_gpr_stream.SetReadPosition(0);
-    
-    if( read_dng( allocator, &inp_gpr_stream, &raw_buffer, &vc5_buffer, NULL ) == false )
+    try
     {
-        assert(0); return false;
+        gpr_buffer_auto raw_buffer(allocator->Alloc, allocator->Free);
+        gpr_buffer_auto vc5_buffer(allocator->Alloc, allocator->Free);
+
+        dng_memory_stream inp_gpr_stream( gDefaultDNGMemoryAllocator );
+        inp_gpr_stream.Put( inp_gpr_buffer->buffer, inp_gpr_buffer->size );
+        inp_gpr_stream.SetReadPosition(0);
+
+        if( read_dng( allocator, &inp_gpr_stream, &raw_buffer, &vc5_buffer, NULL ) == false )
+        {
+            return false;
+        }
+
+        dng_memory_stream out_dng_stream( gDefaultDNGMemoryAllocator );
+
+        write_dng( allocator, &out_dng_stream, &raw_buffer, false, NULL, parameters );
+
+        write_dngstream_to_buffer( &out_dng_stream, out_dng_buffer, allocator->Alloc, allocator->Free );
+    }
+    catch( ... ) // the DNG SDK throws dng_exception on malformed input; C callers expect false
+    {
+        return false;
     }
 
-    dng_memory_stream out_dng_stream( gDefaultDNGMemoryAllocator );
-    
-    write_dng( allocator, &out_dng_stream, &raw_buffer, false, NULL, parameters );
-    
-    write_dngstream_to_buffer( &out_dng_stream, out_dng_buffer, allocator->Alloc, allocator->Free );
-    
     TIMESTAMP("[END]", 1)
 
     return true;
