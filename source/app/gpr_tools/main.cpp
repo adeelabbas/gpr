@@ -168,7 +168,7 @@ int main(int argc, char *argv [])
         printf("    input_width, input_height, input_pitch, input_pixel_format, input_skip_rows and input_skip_cols \n");
         printf("\n");
         printf("\n");
-        printf("-- Example Commnads (please see data/tests/run_tests.sh for more examples) --\n");
+        printf("-- Example Commnads (please see scripts/test_conversions.sh for more examples) --\n");
         printf("GPR to DNG: \n");
         printf("  %s -i ./data/samples/HERO6.GPR -o ./data/samples/HERO6.DNG \n\n", argv[0] );
         printf("GPR to RGB (PPM format in 1000x750 resolution): \n");
