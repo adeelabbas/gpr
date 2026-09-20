@@ -36,11 +36,8 @@
 
         typedef struct
         {
-          gpr_buffer            jpg_preview;                     /* Address to the memory location that this buffer points to */
-          
-          unsigned int          preview_width;                   /* Width of input source in pixels (only applies to raw input) */
-          
-          unsigned int          preview_height;                  /* Height of input source in pixels (only applies to raw input) */
+          gpr_buffer            jpg_preview;                     /* Compressed JPEG bytes to embed as the preview; its pixel
+                                                                    dimensions are read from the JPEG header when written */
 
         } gpr_preview_image;
       

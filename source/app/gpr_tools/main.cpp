@@ -44,10 +44,6 @@ public:
     
     string  jpg_preview_file_path;
 
-    int     jpg_preview_file_width;
-    
-    int     jpg_preview_file_height;
-
     int     input_width;
     
     int     input_height;
@@ -85,8 +81,6 @@ public:
         ("verbose",                                         verbose,                                    false,                  "Verbosity of the output")
 
         ("JpgPreviewFilePath,P",                            jpg_preview_file_path,                      string(""),             "Preview jpg file path")
-        ("JpgPreviewFileWidth,W",                           jpg_preview_file_width,                     0,                      "Preview jpg file width")
-        ("JpgPreviewFileHeight,H",                          jpg_preview_file_height,                    0,                      "Preview jpg file height")
         
         ("DumpGprParameters,d",                             dump_gpr_parameters,                        false,                  "Dump GPR parameters to standard output")
 
@@ -193,7 +187,7 @@ int main(int argc, char *argv [])
     {
         return dng_convert_main(args.input_file_path.c_str(), args.input_width, args.input_height, args.input_pitch, args.input_skip_rows, args.input_pixel_format.c_str(),
                                 args.output_file_path.c_str(), args.apply_gpr_parameters.c_str(), args.gpmf_file_path.c_str(), args.rgb_file_resolution.c_str(), args.rgb_file_bits,
-                                args.jpg_preview_file_path.c_str(), args.jpg_preview_file_width, args.jpg_preview_file_height );
+                                args.jpg_preview_file_path.c_str() );
     }
     
     return 0;

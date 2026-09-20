@@ -68,9 +68,7 @@
 #include "gpr_read_image.h"
 #endif
 
-#if GPR_JPEG_AVAILABLE
-#include "jpeg.h"
-#endif
+#include "jpeg.h" // Needed for calling gpr_jpeg_get_dimensions
 
 extern bool gDNGShowTimers;
 
@@ -348,6 +346,25 @@ static gpr_date_and_time convert_to_dng_date_and_time( const dng_date_time& x )
     a.second = x.fSecond;
     
     return a;
+}
+
+static void add_preview_to_list(dng_host& host, dng_preview_list*& preview_list, const void* preview_buffer, unsigned int preview_h, unsigned int preview_w, unsigned int preview_size )
+{
+    if( preview_list == NULL )
+        preview_list = new dng_preview_list;
+
+    AutoPtr<dng_jpeg_preview> jpeg_preview;
+    jpeg_preview.Reset(new dng_jpeg_preview);
+    jpeg_preview->fPhotometricInterpretation = piYCbCr;
+    jpeg_preview->fInfo.fIsPrimary = true;
+
+    jpeg_preview->fPreviewSize.v             = preview_h;
+    jpeg_preview->fPreviewSize.h             = preview_w;
+    jpeg_preview->fCompressedData.Reset(host.Allocate( preview_size ));
+    memcpy( jpeg_preview->fCompressedData->Buffer_char(), preview_buffer, preview_size );
+    
+    AutoPtr<dng_preview> pp( dynamic_cast<dng_preview*>(jpeg_preview.Release()) );
+    preview_list->Append(pp);
 }
 
 static void convert_dng_exif_info_to_dng_exif( dng_exif* dst_exif, const gpr_exif_info* src_exif )
@@ -1048,23 +1065,6 @@ static bool read_dng(const gpr_allocator*       allocator,
     return true;
 }
 
-typedef struct
-{
-    unsigned char*     orig_dst;                     /* Address to the memory location that this buffer points to */
-
-    unsigned char*     next_dst;
-    
-} jpg_write_context;
-
-void write_jpg_thumbnail(void* context, void* data, int size)
-{
-    jpg_write_context* _context = (jpg_write_context*)context;
-    
-    memcpy( _context->next_dst, data, size );
-    
-    _context->next_dst = (unsigned char*)_context->next_dst + size;
-}
- 
 static void write_dng(const gpr_allocator*          allocator,
                             dng_stream*             dng_write_stream,
                       const gpr_buffer_auto*        raw_image_buffer,
@@ -1525,71 +1525,14 @@ static void write_dng(const gpr_allocator*          allocator,
     dng_image_writer* writer = NULL;
   
 #if GPR_WRITING
+    gpr_image_writer* gpr_writer = NULL;
+
     if( vc5_dng )
     {
-        gpr_image_writer* gpr_writer = new gpr_image_writer(raw_image_buffer, convert_params->input_width, convert_params->input_height, convert_params->input_pitch, vc5_image_buffer );
+        gpr_writer = new gpr_image_writer(raw_image_buffer, convert_params->input_width, convert_params->input_height, convert_params->input_pitch, vc5_image_buffer );
         set_vc5_encoder_parameters( gpr_writer->GetVc5EncoderParams(), convert_params );
 
         gpr_writer->EncodeVc5Image();
-                
-        if( convert_params->enable_preview )
-        {
-            const gpr_preview_image& preview_image = convert_params->preview_image;
-            
-            if( preview_image.jpg_preview.size > 0 && preview_image.jpg_preview.buffer != NULL )
-            {
-                preview_list = new dng_preview_list;
-                
-                AutoPtr<dng_jpeg_preview> jpeg_preview;
-                jpeg_preview.Reset(new dng_jpeg_preview);
-                jpeg_preview->fPhotometricInterpretation = piYCbCr;
-                
-                jpeg_preview->fInfo.fIsPrimary = true;
-                
-                jpeg_preview->fPreviewSize.v             = preview_image.preview_height;
-                jpeg_preview->fPreviewSize.h             = preview_image.preview_width;
-                jpeg_preview->fCompressedData.Reset(host.Allocate( preview_image.jpg_preview.size ));
-                memcpy( jpeg_preview->fCompressedData->Buffer_char(), preview_image.jpg_preview.buffer, preview_image.jpg_preview.size );
-                
-                AutoPtr<dng_preview> pp( dynamic_cast<dng_preview*>(jpeg_preview.Release()) );
-                
-                preview_list->Append(pp);
-            }
-#if GPR_JPEG_AVAILABLE
-            else
-            {
-                preview_list = new dng_preview_list;
-                
-                AutoPtr<dng_jpeg_preview> jpeg_preview;
-                jpeg_preview.Reset(new dng_jpeg_preview);
-                jpeg_preview->fPhotometricInterpretation = piYCbCr;
-                
-                jpeg_preview->fInfo.fIsPrimary = true;
-                
-                const gpr_rgb_buffer& rgb_buffer = gpr_writer->get_rgb_thumbnail();
-                
-                gpr_buffer_auto buffer( allocator->Alloc, allocator->Free );
-                
-                buffer.allocate(1024*1024);
-
-                jpg_write_context context;
-                context.orig_dst = buffer.to_uchar();
-                context.next_dst = context.orig_dst;
-                
-                tje_encode_with_func(write_jpg_thumbnail, (void*)&context, 2, rgb_buffer.width, rgb_buffer.height, 3, (const unsigned char*)rgb_buffer.buffer );
-                
-                size_t size = context.next_dst - context.orig_dst;
-                jpeg_preview->fPreviewSize.v             = rgb_buffer.height;
-                jpeg_preview->fPreviewSize.h             = rgb_buffer.width;
-                jpeg_preview->fCompressedData.Reset(host.Allocate( size ));
-                memcpy( jpeg_preview->fCompressedData->Buffer_char(), buffer.get_buffer(), size );
-
-                AutoPtr<dng_preview> pp( dynamic_cast<dng_preview*>(jpeg_preview.Release()) );
-                
-                preview_list->Append(pp);
-            }
-#endif
-        }
 
         writer = gpr_writer;
     }
@@ -1597,6 +1540,63 @@ static void write_dng(const gpr_allocator*          allocator,
 #endif
     {
         writer = new dng_image_writer;
+    }
+
+    // Preview / thumbnail, for both output paths. Without one, WriteDNG leaves the raw image
+    // itself in IFD 0, where the DNG spec says the thumbnail lives - so a reader that shows
+    // IFD 0 (Finder, Lightroom, Bridge, anything that does not run its own raw pipeline first)
+    // renders undemosaiced 12-bit CFA samples in a 16-bit container, and the file looks black.
+    // Only the GPR path can generate one for itself, as a by-product of the VC5 encode; the
+    // plain-DNG path runs no encoder, so its preview arrives in preview_image.
+    if( convert_params->enable_preview )
+    {
+        const gpr_preview_image& preview_image = convert_params->preview_image;
+
+        // Read the preview's pixel dimensions straight from the JPEG header (no decode
+        // needed), so callers only have to supply the compressed JPEG bytes. A JPEG whose
+        // header will not parse is dropped rather than embedded as a 0x0 preview, which
+        // makes the DNG writer build a preview IFD with zero tiles (a crash, historically).
+        int preview_w = 0, preview_h = 0;
+
+        if( preview_image.jpg_preview.size > 0 && preview_image.jpg_preview.buffer != NULL &&
+            gpr_jpeg_get_dimensions( (const unsigned char*)preview_image.jpg_preview.buffer,
+                                     preview_image.jpg_preview.size, &preview_w, &preview_h ) )
+        {
+            add_preview_to_list(host, preview_list, preview_image.jpg_preview.buffer, preview_h, preview_w, preview_image.jpg_preview.size );
+        }
+#if GPR_WRITING && GPR_JPEG_AVAILABLE
+        // Only embed the auto-generated thumbnail when one actually exists. It is produced as
+        // a side effect of EncodeVc5Image(); when the vc5 bitstream is supplied pre-encoded
+        // (e.g. gpr_convert_vc5_to_gpr / vc5_to_dng) encoding is skipped and the thumbnail is
+        // empty.
+        else if( gpr_writer != NULL &&
+                 gpr_writer->get_rgb_thumbnail().buffer != NULL &&
+                 gpr_writer->get_rgb_thumbnail().width  > 0 &&
+                 gpr_writer->get_rgb_thumbnail().height > 0 )
+        {
+            const gpr_rgb_buffer& rgb_buffer = gpr_writer->get_rgb_thumbnail();
+
+            // The sink (shared with gpr_encode_rgb_to_jpg) grows its buffer to fit whatever
+            // tiny_jpeg produces; sink.data is libc-heap owned and freed below.
+            gpr_jpg_sink sink = { NULL, 0, 0, false };
+
+            int encoded = tje_encode_with_func(gpr_jpg_sink_write, (void*)&sink, 2, rgb_buffer.width, rgb_buffer.height, 3, (const unsigned char*)rgb_buffer.buffer );
+
+            // A thumbnail that failed to encode (or to fit in memory) is dropped rather than
+            // embedded truncated; the GPR is valid without a preview.
+            if( encoded && sink.failed == false && sink.size > 0 )
+            {
+                add_preview_to_list(host, preview_list, sink.data, rgb_buffer.height, rgb_buffer.width, sink.size );
+
+                // Free up sink
+                free( sink.data );
+            }
+            else
+            {
+                LogPrint("Failed to load preview from GPR encoded images");
+            }
+        }
+#endif
     }
 
     writer->SetComputeMd5Sum( convert_params->compute_md5sum );

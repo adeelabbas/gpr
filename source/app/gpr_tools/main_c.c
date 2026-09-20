@@ -97,7 +97,7 @@ static FILE_TYPE GetFileType( const char* file_path )
 
 int dng_convert_main(const char*  input_file_path, unsigned int input_width, unsigned int input_height, size_t input_pitch, size_t input_skip_rows, const char* input_pixel_format,
                      const char*  output_file_path, const char*  metadata_file_path, const char* gpmf_file_path, const char* rgb_file_resolution, int rgb_file_bits,
-                     const char*  jpg_preview_file_path, int jpg_preview_file_width, int jpg_preview_file_height )
+                     const char*  jpg_preview_file_path )
 {
     bool success;
     bool write_buffer_to_file = true;
@@ -217,8 +217,6 @@ int dng_convert_main(const char*  input_file_path, unsigned int input_width, uns
         if( read_from_file( &preview, jpg_preview_file_path, allocator.Alloc, allocator.Free) == 0 )
         {
             params.preview_image.jpg_preview    = preview;
-            params.preview_image.preview_width  = jpg_preview_file_width;
-            params.preview_image.preview_height = jpg_preview_file_height;
         }
     }
     
