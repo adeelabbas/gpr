@@ -1720,6 +1720,8 @@ bool gpr_convert_gpr_to_rgb(const gpr_allocator*        allocator,
 
     gpr_parameters params;
 
+    gpr_parameters_set_defaults( &params );
+
     gpr_buffer_auto vc5_buffer(allocator->Alloc, allocator->Free);
 
     try
@@ -1730,16 +1732,19 @@ bool gpr_convert_gpr_to_rgb(const gpr_allocator*        allocator,
 
         if( read_dng( allocator, &inp_gpr_stream, NULL, &vc5_buffer, &params ) == false )
         {
+            gpr_parameters_destroy( &params, allocator->Free );
             return false;
         }
     }
     catch( ... ) // the DNG SDK throws dng_exception on malformed input; C callers expect false
     {
+        gpr_parameters_destroy( &params, allocator->Free );
         return false;
     }
 
     if( vc5_buffer.is_valid() == false )
     {
+        gpr_parameters_destroy( &params, allocator->Free );
         return false;
     }
     
@@ -1763,8 +1768,11 @@ bool gpr_convert_gpr_to_rgb(const gpr_allocator*        allocator,
 
     if( vc5_decoder_process( &vc5_decoder_params, &vc5_buffer.get_gpr_buffer(), NULL, out_rgb_buffer ) != CODEC_ERROR_OKAY )
     {
-        assert(0);
+        gpr_parameters_destroy( &params, allocator->Free );
+        return false;
     }
+
+    gpr_parameters_destroy( &params, allocator->Free );
 
     TIMESTAMP("[END]", 1)
 
