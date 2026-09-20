@@ -130,10 +130,27 @@ static unsigned int pixel_format_get_bits(GPR_PIXEL_FORMAT p)
     }
 }
 
-int dng_convert_main(const char*  input_file_path, unsigned int input_width, unsigned int input_height, size_t input_pitch, size_t input_skip_rows, const char* input_pixel_format,
-                     const char*  output_file_path, const char*  metadata_file_path, const char* gpmf_file_path, const char* rgb_file_resolution, int rgb_file_bits,
-                     const char*  jpg_preview_file_path )
+int dng_convert_main( const dng_convert_params* convert_params )
 {
+    if( convert_params == NULL )
+    {
+        printf( "No conversion parameters provided" );
+        return -1;
+    }
+
+    // Unpack into local working copies. Several of these are mutated below, so we
+    // deliberately keep the caller's dng_convert_params untouched.
+    const char*  input_file_path        = convert_params->input_file_path;
+    size_t       input_skip_rows        = convert_params->input_skip_rows;
+    size_t       input_pitch            = convert_params->input_pitch;
+    const char*  input_pixel_format     = convert_params->input_pixel_format;
+    const char*  output_file_path       = convert_params->output_file_path;
+    const char*  metadata_file_path     = convert_params->metadata_file_path;
+    const char*  gpmf_file_path         = convert_params->gpmf_file_path;
+    const char*  rgb_file_resolution    = convert_params->rgb_file_resolution;
+    int          rgb_file_bits          = convert_params->rgb_file_bits;
+    const char*  jpg_preview_file_path  = convert_params->jpg_preview_file_path;
+
     bool success;
     bool write_buffer_to_file = true;
     
@@ -158,6 +175,9 @@ int dng_convert_main(const char*  input_file_path, unsigned int input_width, uns
     
     gpr_parameters params;
     gpr_parameters_set_defaults(&params);
+    params.input_width  = convert_params->input_width;
+    params.input_height = convert_params->input_height;
+    params.input_pitch  = convert_params->input_pitch;
     
     gpr_buffer input_buffer  = { NULL, 0 };
     
@@ -192,9 +212,6 @@ int dng_convert_main(const char*  input_file_path, unsigned int input_width, uns
     }
     else
     {
-        params.input_width  = input_width;
-        params.input_height = input_height;
-        params.input_pitch  = input_pitch;
         // Default RAW pixel format when -x is not specified.
         if( strcmp(input_pixel_format, "") == 0 )
             input_pixel_format = "rggb14";
