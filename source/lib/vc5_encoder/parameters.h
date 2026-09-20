@@ -115,9 +115,7 @@ typedef struct _encoder_parameters
 	//! Number of entries in the channel order table (may be less than the channel count)
 	int channel_order_count;
     
-	//! Flag that controls verbose output
-	bool verbose_flag;
-
+    //! Allocator
     gpr_allocator       allocator;
     
     GPR_RGB_RESOLUTION  rgb_resolution;

@@ -33,7 +33,6 @@ CODEC_ERROR InitDecoderParameters(DECODER_PARAMETERS *parameters)
 {
 	memset(parameters, 0, sizeof(DECODER_PARAMETERS));
 	parameters->version = 1;
-	parameters->verbose_flag = false;
  
     parameters->enabled_parts = VC5_ENABLED_PARTS;
     

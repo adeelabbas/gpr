@@ -420,18 +420,6 @@ CODEC_ERROR EncodingProcess(ENCODER *encoder,
 	if (encoder->image_format == IMAGE_FORMAT_UNKNOWN) {
 		return CODEC_ERROR_BAD_IMAGE_FORMAT;
 	}
-	if ( parameters->verbose_flag )
-	{
-		LogPrint("Pattern width: %d\n", encoder->pattern_width);
-		LogPrint("Pattern height: %d\n", encoder->pattern_height);
-        
-        if (!IsPartEnabled(encoder->enabled_parts, VC5_PART_COLOR_SAMPLING)) {
-            LogPrint("Components per sample: %d\n", encoder->components_per_sample);
-        }
-        LogPrint("Internal precision: %d\n", encoder->internal_precision);
-        
-		LogPrint("\n");
-	}
 #endif
     
 	// Write the bitstream start marker

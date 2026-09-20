@@ -75,8 +75,6 @@ CODEC_ERROR InitEncoderParameters(ENCODER_PARAMETERS *parameters)
         memcpy(parameters->quant_table, quant_table, sizeof(parameters->quant_table));
     }
 
-	parameters->verbose_flag = false;
-    
     gpr_rgb_gain_set_defaults(&parameters->rgb_gain);
     
     parameters->rgb_resolution = VC5_ENCODER_RGB_RESOLUTION_DEFAULT;

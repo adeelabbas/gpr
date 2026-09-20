@@ -93,9 +93,6 @@ typedef struct _decoder_parameters
 	METADATA metadata;
 #endif
 
-	//! Flag that controls verbose output
-	bool verbose_flag;
-    
     GPR_RGB_RESOLUTION  rgb_resolution;
     
     int                         rgb_bits;
