@@ -95,6 +95,41 @@ static FILE_TYPE GetFileType( const char* file_path )
     return FILE_TYPE_UNKNOWN;
 }
 
+// Map a -x pixel format string to its enum. Returns 1 on match, 0 otherwise.
+static int parse_input_pixel_format( const char* s, GPR_PIXEL_FORMAT* out )
+{
+    if( strcmp(s, "rggb12")  == 0 ) { *out = PIXEL_FORMAT_RGGB_12;  return 1; }
+    if( strcmp(s, "rggb12p") == 0 ) { *out = PIXEL_FORMAT_RGGB_12P; return 1; }
+    if( strcmp(s, "rggb14")  == 0 ) { *out = PIXEL_FORMAT_RGGB_14;  return 1; }
+    if( strcmp(s, "gbrg12")  == 0 ) { *out = PIXEL_FORMAT_GBRG_12;  return 1; }
+    if( strcmp(s, "gbrg12p") == 0 ) { *out = PIXEL_FORMAT_GBRG_12P; return 1; }
+    if( strcmp(s, "bggr12")  == 0 ) { *out = PIXEL_FORMAT_BGGR_12;  return 1; }
+    if( strcmp(s, "bggr14")  == 0 ) { *out = PIXEL_FORMAT_BGGR_14;  return 1; }
+    return 0;
+}
+
+static bool pixel_format_is_packed(GPR_PIXEL_FORMAT p)
+{
+    switch( p ) {
+        case PIXEL_FORMAT_RGGB_12P:
+        case PIXEL_FORMAT_GBRG_12P:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static unsigned int pixel_format_get_bits(GPR_PIXEL_FORMAT p)
+{
+    switch( p ) {
+        case PIXEL_FORMAT_RGGB_14:
+        case PIXEL_FORMAT_BGGR_14:
+            return 14;
+        default:
+            return 12;
+    }
+}
+
 int dng_convert_main(const char*  input_file_path, unsigned int input_width, unsigned int input_height, size_t input_pitch, size_t input_skip_rows, const char* input_pixel_format,
                      const char*  output_file_path, const char*  metadata_file_path, const char* gpmf_file_path, const char* rgb_file_resolution, int rgb_file_bits,
                      const char*  jpg_preview_file_path )
@@ -135,62 +170,58 @@ int dng_convert_main(const char*  input_file_path, unsigned int input_width, uns
     {
         if( gpr_parameters_parse_json( &params, metadata_file_path ) != 0 )
             return -1;
+
+        // -x is optional here: when absent, keep the pixel format from the metadata file.
+        if( strcmp(input_pixel_format, "") != 0 &&
+            parse_input_pixel_format(input_pixel_format, &params.tuning_info.pixel_format) == 0 ) {
+            fprintf( stderr, "Invalid pixel format %s\n", input_pixel_format);
+            return -1;
+        }
     }
     else if( input_file_type == FILE_TYPE_GPR || input_file_type == FILE_TYPE_DNG )
     {
         if( gpr_parameters_parse_dng( &allocator, &input_buffer, &params ) == false )
             return -1;
+
+        // -x is optional here: when absent, keep the pixel format read from the DNG/GPR.
+        if( strcmp(input_pixel_format, "") != 0 &&
+            parse_input_pixel_format(input_pixel_format, &params.tuning_info.pixel_format) == 0 ) {
+            fprintf( stderr, "Invalid pixel format %s\n", input_pixel_format);
+            return -1;
+        }
     }
     else
     {
         params.input_width  = input_width;
         params.input_height = input_height;
         params.input_pitch  = input_pitch;
+        // Default RAW pixel format when -x is not specified.
+        if( strcmp(input_pixel_format, "") == 0 )
+            input_pixel_format = "rggb14";
+
+        if( parse_input_pixel_format(input_pixel_format, &params.tuning_info.pixel_format) == 0 ) {
+            fprintf( stderr, "Invalid pixel format %s\n", input_pixel_format);
+            return -1;
+        }
+
+        if( params.input_pitch <= 0 )
+        {
+            if( pixel_format_is_packed(params.tuning_info.pixel_format) ) {
+                params.input_pitch = (params.input_width * 3 / 4) * 2;
+            } else {
+                params.input_pitch = params.input_width * 2;
+            }
+        }
         
         int32_t saturation_level = params.tuning_info.dgain_saturation_level.level_red;
-        
-        if( output_file_type == FILE_TYPE_GPR )
+        if( pixel_format_get_bits(params.tuning_info.pixel_format) == 14 )
+            saturation_level = (1 << 14) - 1;
+        else if( output_file_type == FILE_TYPE_GPR )
             saturation_level = (1 << 14) - 1;
         else if( output_file_type == FILE_TYPE_DNG )
             saturation_level = (1 << 12) - 1;
-        
-        if( strcmp(input_pixel_format, "rggb12") == 0 )
-        {
-            params.tuning_info.pixel_format = PIXEL_FORMAT_RGGB_12;
-            
-            if( input_pitch == -1 )
-                input_pitch = input_width * 2;
-        }
-        if( strcmp(input_pixel_format, "rggb12p") == 0 )
-        {
-            params.tuning_info.pixel_format = PIXEL_FORMAT_RGGB_12P;
-            
-            if( input_pitch == -1 )
-                input_pitch = (input_width * 3 / 4) * 2;
-        }
-        else if( strcmp(input_pixel_format, "rggb14") == 0 )
-        {
-            params.tuning_info.pixel_format = PIXEL_FORMAT_RGGB_14;
-            
-            saturation_level = (1 << 14) - 1;
-
-            if( input_pitch == -1 )
-                input_pitch = input_width * 2;
-        }
-        else if( strcmp(input_pixel_format, "gbrg12") == 0 )
-        {
-            params.tuning_info.pixel_format = PIXEL_FORMAT_GBRG_12;
-            
-            if( input_pitch == -1 )
-                input_pitch = input_width * 2;
-        }
-        else if( strcmp(input_pixel_format, "gbrg12p") == 0 )
-        {
-            params.tuning_info.pixel_format = PIXEL_FORMAT_GBRG_12P;
-            
-            if( input_pitch == -1 )
-                input_pitch = (input_width * 3 / 4) * 2;
-        }
+        else
+            saturation_level = 0;
         
         params.tuning_info.dgain_saturation_level.level_red         = saturation_level;
         params.tuning_info.dgain_saturation_level.level_green_even  = saturation_level;
@@ -198,6 +229,7 @@ int dng_convert_main(const char*  input_file_path, unsigned int input_width, uns
         params.tuning_info.dgain_saturation_level.level_blue        = saturation_level;
     }
     
+
     if( gpmf_file_path != NULL && strcmp(gpmf_file_path, "") )
     {
         read_from_file( &params.gpmf_payload, gpmf_file_path, allocator.Alloc, allocator.Free );
