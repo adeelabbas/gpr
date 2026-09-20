@@ -66,6 +66,7 @@ int32_t gpr_tuning_info_get_dgain_saturation_level(const gpr_tuning_info* x, GPR
 
 void gpr_tuning_info_set_defaults( gpr_tuning_info* x )
 {
+    x->has_opcode_gain_maps = false;
     x->orientation = ORIENTATION_DEFAULT;
     
     _static_black_level_set_defaults(&x->static_black_level);
@@ -82,6 +83,12 @@ void gpr_tuning_info_set_defaults( gpr_tuning_info* x )
     x->noise_offset = 0.0;
 
     x->pixel_format = PIXEL_FORMAT_RGGB_14;
+
+    x->baseline_exposure = 0.0;
+
+    x->baseline_sharpness = 1.0;
+
+    x->baseline_noise = 1.0;
 }
 
 
