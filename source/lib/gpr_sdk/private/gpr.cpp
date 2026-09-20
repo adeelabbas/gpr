@@ -1455,20 +1455,44 @@ bool write_dngstream_to_buffer( dng_stream* stream, gpr_buffer* output_buffer, g
     return true;
 }
 
+bool gpr_parameters_parse_dng(const gpr_allocator*  allocator,
+                                    gpr_buffer*     inp_dng_buffer,
+                                    gpr_parameters* parameters)
+{
+    try
+    {
+        // Read-only view over the caller's buffer - no copy of the input file
+        dng_stream inp_dng_stream( inp_dng_buffer->buffer, (uint32)inp_dng_buffer->size );
+
+        return read_dng( allocator, &inp_dng_stream, NULL, NULL, parameters );
+    }
+    catch( ... ) // the DNG SDK throws dng_exception on malformed input; C callers expect false
+    {
+        return false;
+    }
+}
+
+bool gpr_parameters_parse_dng_file(const gpr_allocator*  allocator,
+                                   const char*           inp_file_path,
+                                         gpr_parameters* parameters)
+{
+    try
+    {
+        dng_file_stream inp_dng_stream( inp_file_path );
+
+        return read_dng( allocator, &inp_dng_stream, NULL, NULL, parameters );
+    }
+    catch( ... ) // dng_file_stream and the DNG SDK throw dng_exception (unopenable or malformed file)
+    {
+        return false;
+    }
+}
+
 bool gpr_parse_metadata(const gpr_allocator*        allocator,
                               gpr_buffer*           inp_dng_buffer,
                               gpr_parameters*       parameters)
 {
-    dng_memory_stream inp_dng_stream( gDefaultDNGMemoryAllocator );
-    inp_dng_stream.Put( inp_dng_buffer->buffer, inp_dng_buffer->size );
-    inp_dng_stream.SetReadPosition(0);
-    
-    if( read_dng( allocator, &inp_dng_stream, NULL, NULL, parameters ) == false )
-    {
-        assert(0); return false;
-    }
-    
-    return true;
+    return gpr_parameters_parse_dng( allocator, inp_dng_buffer, parameters );
 }
 
 bool gpr_convert_raw_to_dng(const gpr_allocator*    allocator,

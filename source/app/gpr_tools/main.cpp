@@ -120,25 +120,23 @@ int dng_dump(const char*  input_file_path)
     allocator.Alloc = malloc;
     allocator.Free = free;
 
-    gpr_buffer input_buffer  = { NULL, 0 };
-    
     gpr_parameters params;
 
     gpr_parameters_set_defaults(&params);
 
-    if( read_from_file( &input_buffer, input_file_path, allocator.Alloc, allocator.Free ) != 0 )
-    {
-        return -1;
-    }
+    // Stream the metadata straight from the file; the image payload is never read
+    int success = gpr_parameters_parse_dng_file( &allocator, input_file_path, &params );
 
-    int success = gpr_parse_metadata( &allocator, &input_buffer, &params );
-    
     if( success )
     {
         gpr_parameters_print( &params, NULL );
     }
+    else
+    {
+        fprintf( stderr, "Error while parsing file: %s \n", input_file_path );
+    }
 
-    return 0;
+    return success ? 0 : -1;
 }
 
 int main(int argc, char *argv [])
