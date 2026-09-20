@@ -63,6 +63,8 @@ public:
     
     int     output_ppm_bits;
 
+    int     output_jpg_quality;
+
 public:
 
     bool get_verbose() { return verbose; }
@@ -117,6 +119,8 @@ public:
         ("rgb_resolution",          rgb_resolution,       string(""),       "Output RGB resolution. Only applicable when output format is PPM or JPG \n"
                                                                             "Choices: 1:1, 2:1, [4:1], 8:1. 16:1")
         ("output_ppm_bits",         output_ppm_bits,      8,                "Output bits, use only with PPM output. Choices [8], 16")
+        ("output_jpg_quality",      output_jpg_quality,   2,                "Output quality for JPG output \n "
+                                                                            "Choices: (1=lowest, [2]balanced, 3=highest)")
         ;
     }
 };
@@ -219,6 +223,7 @@ int main(int argc, char *argv [])
         convert_params.lens_correction_strength = args.lens_correction_strength.c_str();
         convert_params.rgb_file_resolution     = args.rgb_resolution.c_str();
         convert_params.rgb_file_bits           = args.output_ppm_bits;
+        convert_params.jpg_quality             = args.output_jpg_quality;
         convert_params.preview                 = args.preview.c_str();
 
         return dng_convert_main( &convert_params );

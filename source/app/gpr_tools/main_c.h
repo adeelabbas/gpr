@@ -56,6 +56,7 @@ extern "C" {
 
         const char*     rgb_file_resolution;
         int             rgb_file_bits;
+        int             jpg_quality;
 
         const char*     preview;                 /* Embedded preview image. NULL or empty: no preview is
                                                     written. The path of a jpg file on disk: that file is

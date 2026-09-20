@@ -31,10 +31,6 @@
 #include "main_c.h"
 #include "gpr_parse_utils.h"
 #include "gpr_print_utils.h"
-
-#if GPR_JPEG_AVAILABLE
-#include "jpeg.h"
-#endif
 #include "gpr_lens_profiles.h"
 
 #define MAX_FILE_PATH 256
@@ -141,6 +137,19 @@ static int parse_ratio( const char* ratio, GPR_RGB_RESOLUTION* out )
     return 0;
 }
 
+static GPR_RGB_RESOLUTION parse_resolution(const char* resolution)
+{
+    // Default for RGB (PPM/JPG) output when -r is not given. Deliberately not
+    // GPR_RGB_RESOLUTION_DEFAULT: that now means "none", which would produce no image.
+    GPR_RGB_RESOLUTION res = GPR_RGB_RESOLUTION_QUARTER;
+
+    if( strcmp(resolution, "") != 0 && parse_ratio( resolution, &res ) == 0 )
+    {
+        fprintf( stderr, "Unsupported resolution `%s'; using 4:1. Valid values: 2:1, 4:1, 8:1, 16:1\n", resolution );
+    }
+    return res;
+}
+
 int dng_convert_main( const dng_convert_params* convert_params )
 {
     if( convert_params == NULL )
@@ -163,6 +172,7 @@ int dng_convert_main( const dng_convert_params* convert_params )
     const char*  lens_strength_arg      = convert_params->lens_correction_strength;
     const char*  rgb_file_resolution    = convert_params->rgb_file_resolution;
     int          rgb_file_bits          = convert_params->rgb_file_bits;
+    int          jpg_quality            = convert_params->jpg_quality;
     const char*  preview                = convert_params->preview;
 
     bool success;
@@ -444,66 +454,36 @@ int dng_convert_main( const dng_convert_params* convert_params )
     }
 #endif
 #if GPR_READING
-    else if( input_file_type == FILE_TYPE_GPR && ( output_file_type == FILE_TYPE_PPM || output_file_type == FILE_TYPE_JPG ) )
+    else if( input_file_type == FILE_TYPE_GPR && output_file_type == FILE_TYPE_PPM )
     {
-        gpr_rgb_buffer rgb_buffer = { NULL, 0, 0, 0 };
+        GPR_RGB_RESOLUTION rgb_resolution = parse_resolution(rgb_file_resolution);
 
-        GPR_RGB_RESOLUTION rgb_resolution = GPR_RGB_RESOLUTION_QUARTER;
-        
-        if( strcmp(rgb_file_resolution, "1:1") == 0 )
-            rgb_resolution = GPR_RGB_RESOLUTION_FULL;
-        else if( strcmp(rgb_file_resolution, "2:1") == 0 )
-            rgb_resolution = GPR_RGB_RESOLUTION_HALF;
-        else if( strcmp(rgb_file_resolution, "4:1") == 0 )
-            rgb_resolution = GPR_RGB_RESOLUTION_QUARTER;
-        else if( strcmp(rgb_file_resolution, "8:1") == 0 )
-            rgb_resolution = GPR_RGB_RESOLUTION_EIGHTH;
-        else if( strcmp(rgb_file_resolution, "16:1") == 0 )
-            rgb_resolution = GPR_RGB_RESOLUTION_SIXTEENTH;
+        // PPM has no metadata channel, so orientation cannot be recorded; the pixels are
+        // written in sensor orientation. Warn when that differs from the display orientation.
+        if( (int)params.tuning_info.orientation != ORIENTATION_NORMAL )
+            fprintf( stderr, "Note: PPM cannot store orientation; output pixels are in sensor "
+                             "orientation (not rotated). Use JPG output to preserve orientation.\n" );
 
-        if( output_file_type == FILE_TYPE_JPG && rgb_file_bits == 16 )
-        {
+        success = gpr_convert_gpr_to_ppm( &allocator, rgb_resolution, rgb_file_bits, &input_buffer, &output_buffer );
+    }
+    else if( input_file_type == FILE_TYPE_GPR && output_file_type == FILE_TYPE_JPG )
+    {
+        GPR_RGB_RESOLUTION rgb_resolution = parse_resolution(rgb_file_resolution);
+
+        if( rgb_file_bits == 16 )
             printf( "Asked to output 16-bits RGB, but that is only possible in PPM format.\n");
-            rgb_file_bits = 8;
-        }
-            
-        success = gpr_convert_gpr_to_rgb( &allocator, rgb_resolution, rgb_file_bits,  &input_buffer, &rgb_buffer );
-        
-        if( output_file_type == FILE_TYPE_PPM )
-        {
-#define PPM_HEADER_SIZE 100
-            char header_text[PPM_HEADER_SIZE];
 
-            if( rgb_file_bits == 8 )
-            {
-                // 8 bits
-                sprintf( header_text, "P6\n%ld %ld\n255\n", rgb_buffer.width, rgb_buffer.height );
-            }
-            else
-            {
-                // 16 bits
-                sprintf( header_text, "P6\n%ld %ld\n65535\n", rgb_buffer.width, rgb_buffer.height );
-            }
-            
-            output_buffer.size   = rgb_buffer.size + strlen( header_text );
-            output_buffer.buffer = allocator.Alloc( output_buffer.size );
-            char* buffer_c = (char*)output_buffer.buffer;
-            
-            memcpy( buffer_c, header_text, strlen( header_text ) );
-            memcpy( buffer_c + strlen( header_text ), rgb_buffer.buffer, rgb_buffer.size );
-#undef PPM_HEADER_SIZE
-        }
-        else if( output_file_type == FILE_TYPE_JPG )
+        // tinyjpeg only supports quality levels 1 (lowest), 2, or 3 (highest)
+        if( jpg_quality < 1 || jpg_quality > 3 )
         {
-            write_buffer_to_file = false;
-#if GPR_JPEG_AVAILABLE
-            tje_encode_to_file( output_file_path, rgb_buffer.width, rgb_buffer.height, 3, rgb_buffer.buffer );
-#else
-            printf("JPG writing capability is disabled. You could still write to a PPM file");
-#endif
+            fprintf( stderr, "JPG quality %d out of range, clamping to [1,3]\n", jpg_quality );
+            jpg_quality = jpg_quality < 1 ? 1 : 3;
         }
 
-        allocator.Free( rgb_buffer.buffer );
+        success = gpr_convert_gpr_to_jpg( &allocator, rgb_resolution, jpg_quality, &input_buffer, &output_buffer );
+
+        if( success == 0 )
+            fprintf( stderr, "Failed to convert GPR to JPG (is JPEG support compiled in?)\n" );
     }
     else if( input_file_type == FILE_TYPE_GPR && output_file_type == FILE_TYPE_DNG )
     {
