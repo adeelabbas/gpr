@@ -72,7 +72,7 @@
         
         void gpr_parameters_set_defaults(gpr_parameters* x);
 
-        void gpr_parameters_construct_copy(const gpr_parameters* y, gpr_parameters* x);
+        void gpr_parameters_construct_copy(const gpr_parameters* y, gpr_parameters* x, gpr_malloc mem_alloc);
 
         void gpr_parameters_destroy(gpr_parameters* x, gpr_free mem_free);
 
@@ -82,9 +82,11 @@
                                       gpr_parameters*   parameters);
         
         //!< CHECK IF DNG IS VC5 COMPRESSED
-        bool gpr_check_vc5( gpr_buffer* inp_dng_buffer, gpr_malloc mem_alloc, gpr_free mem_free );
+        bool gpr_check_vc5(const gpr_allocator*     allocator,
+                           gpr_buffer*              inp_dng_buffer);
         
         //!< CONVERSION FUNCTIONS
+
 
         //!< raw to dng conversion
         bool gpr_convert_raw_to_dng(const gpr_allocator*    allocator,
