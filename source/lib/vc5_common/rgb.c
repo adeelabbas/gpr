@@ -179,6 +179,41 @@ void rgb_parameters_set_default( RGB_PARAMETERS* rgb_params )
             rgb_params->color_matrix[i][j] = ( i == j ) ? 1.0f : 0.0f;
 
     rgb_params->baseline_exposure = 0.0f;
+
+    memset( &rgb_params->shading_map, 0, sizeof(rgb_params->shading_map) );
+}
+
+// Bilinear sample of one shading grid at grid coordinates (fv, fh), with edge
+// clamping - the same interpolation and clamping dng_gain_map.cpp applies
+// (dng_gain_map_interpolator, :123-160).
+static float shading_gain( const float* samples, int points_v, int points_h,
+                           float fv, float fh )
+{
+    int   v0, h0, v1, h1;
+    float wv, wh, top, bot;
+
+    if( fv < 0.0f ) fv = 0.0f;
+    if( fh < 0.0f ) fh = 0.0f;
+
+    v0 = (int)fv;
+    h0 = (int)fh;
+
+    if( v0 > points_v - 1 ) v0 = points_v - 1;
+    if( h0 > points_h - 1 ) h0 = points_h - 1;
+
+    v1 = ( v0 + 1 < points_v ) ? v0 + 1 : v0;
+    h1 = ( h0 + 1 < points_h ) ? h0 + 1 : h0;
+
+    wv = fv - (float)v0;
+    wh = fh - (float)h0;
+
+    if( wv < 0.0f ) wv = 0.0f; else if( wv > 1.0f ) wv = 1.0f;
+    if( wh < 0.0f ) wh = 0.0f; else if( wh > 1.0f ) wh = 1.0f;
+
+    top = samples[v0 * points_h + h0] * ( 1.0f - wh ) + samples[v0 * points_h + h1] * wh;
+    bot = samples[v1 * points_h + h0] * ( 1.0f - wh ) + samples[v1 * points_h + h1] * wh;
+
+    return top * ( 1.0f - wv ) + bot * wv;
 }
 
 void WaveletToRGB(gpr_allocator allocator, PIXEL* GS_src, PIXEL* RG_src, PIXEL* BG_src, DIMENSION src_width, DIMENSION src_height, DIMENSION src_pitch,
@@ -235,10 +270,30 @@ void WaveletToRGB(gpr_allocator allocator, PIXEL* GS_src, PIXEL* RG_src, PIXEL* 
     unsigned char*  RGB_dst_8bits  = dst_image->buffer;
     unsigned short* RGB_dst_16bits = dst_image->buffer;
 
+    // Lens shading correction (OpcodeList2 GainMap), applied per pixel below.
+    // The grid is addressed in normalized image coordinates, so it is
+    // independent of the RGB resolution this render happens to be at - a
+    // quarter-size decode samples the same surface as a full-size one.
+    const RGB_SHADING_MAP*  shading         = &rgb_params->shading_map;
+    const int               shading_active  = ( shading->samples[0] != NULL &&
+                                                shading->samples[1] != NULL &&
+                                                shading->samples[2] != NULL &&
+                                                shading->points_v > 0 && shading->points_h > 0 &&
+                                                shading->spacing_v > 0.0f && shading->spacing_h > 0.0f );
+    const float             shading_inv_w   = shading_active ? ( 1.0f / (float)src_width  ) : 0.0f;
+    const float             shading_inv_h   = shading_active ? ( 1.0f / (float)src_height ) : 0.0f;
+    const float             shading_inv_sh  = shading_active ? ( 1.0f / shading->spacing_h ) : 0.0f;
+    const float             shading_inv_sv  = shading_active ? ( 1.0f / shading->spacing_v ) : 0.0f;
+
     DIMENSION x, y;
 
     for ( y = 0; y < src_height; y++)
     {
+        // Grid row coordinate for this output row - constant across the row.
+        const float shading_fv = shading_active
+            ? ( ( ( (float)y + 0.5f ) * shading_inv_h ) - shading->origin_v ) * shading_inv_sv
+            : 0.0f;
+
         for ( x = 0;  x < src_width; x++)
         {
             int32_t G = GS_src[ x + y * src_pitch];
@@ -258,6 +313,32 @@ void WaveletToRGB(gpr_allocator allocator, PIXEL* GS_src, PIXEL* RG_src, PIXEL* 
             R = ( R > black_level ) ? ( R - black_level ) : 0;
             G = ( G > black_level ) ? ( G - black_level ) : 0;
             B = ( B > black_level ) ? ( B - black_level ) : 0;
+
+            // Lens shading correction, between black subtraction and white balance -
+            // where the DNG spec places OpcodeList2, and where the camera's
+            // BaselineExposure assumes it has happened. Without this the corners of a
+            // GoPro frame render up to ~1.9 EV dark on every path that renders through
+            // here (reduced-size raster exports, the embedded preview, and so the
+            // Finder thumbnail and Quick Look preview).
+            //
+            // Saturated to the 16-bit ceiling: the gains reach ~3.9 at the corners and
+            // would otherwise wrap the int32 arithmetic below on a clipped highlight.
+            if( shading_active )
+            {
+                const float fh = ( ( ( (float)x + 0.5f ) * shading_inv_w ) - shading->origin_h ) * shading_inv_sh;
+
+                const float gain_r = shading_gain( shading->samples[0], shading->points_v, shading->points_h, shading_fv, fh );
+                const float gain_g = shading_gain( shading->samples[1], shading->points_v, shading->points_h, shading_fv, fh );
+                const float gain_b = shading_gain( shading->samples[2], shading->points_v, shading->points_h, shading_fv, fh );
+
+                R = (int32_t)( (float)R * gain_r + 0.5f );
+                G = (int32_t)( (float)G * gain_g + 0.5f );
+                B = (int32_t)( (float)B * gain_b + 0.5f );
+
+                if( R > 65535 ) R = 65535;
+                if( G > 65535 ) G = 65535;
+                if( B > 65535 ) B = 65535;
+            }
 
             // Apply the white-balance gains. Common to both output depths -- previously this was
             // only done on the 8-bit path, so 16-bit output was left un-white-balanced (green cast).
