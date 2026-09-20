@@ -118,6 +118,16 @@ int argument_parser::parse(int argc, char *argv [], const char* application_text
         return -1;
     }
 
+    // Unknown options are fatal (the specific message was already printed by the
+    // scanner). Checked after the help path so --help always wins, and distinct
+    // from the ignored-with-warning unhandled positional arguments above, which
+    // documented usage relies on ("-d 1" leaves "1" unhandled).
+    if ( command_options.scan_failed )
+    {
+        fprintf( stderr, "Exiting due to invalid command line option(s), see message(s) above. Run with --help for the option list\n" );
+        return -1;
+    }
+
     if( application_text )
     {
         if( prefix_text )
