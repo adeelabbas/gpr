@@ -22,17 +22,22 @@
 #include "stdc_includes.h"
 
 TIMER LogTimer;
+static bool timerInitialized = false;
 
 bool LogInit(void)
 {
     InitTimer(&LogTimer);
-
     return true;
 }
 
 #ifndef LogPrint
 int LogPrint(const char* format, ... )
 {
+    if( timerInitialized == false )
+    {
+        InitTimer(&LogTimer);
+        timerInitialized = true;
+    }
     StopTimer(&LogTimer);
 
 	printf("[%5d-ms] ", (unsigned int)TimeMSecs(&LogTimer));
