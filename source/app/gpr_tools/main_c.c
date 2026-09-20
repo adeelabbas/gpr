@@ -494,6 +494,18 @@ int dng_convert_main( const dng_convert_params* convert_params )
         success = gpr_convert_gpr_to_raw( &allocator, &input_buffer, &output_buffer );
     }
 #endif
+#if GPR_WRITING && GPR_READING
+    else if( input_file_type == FILE_TYPE_GPR && output_file_type == FILE_TYPE_GPR )
+    {
+        // Rewrites the container around the existing vc5 bitstream with updated metadata. When
+        // --preview requests an auto-generated thumbnail (a downscale ratio), the SDK falls
+        // back to a full re-encode to produce it -- so this can still be used to add or refresh
+        // the preview on a GPR file, e.g. one that was written without a preview. With
+        // --preview omitted (or set to a jpg file, which is embedded as-is) the vc5 bitstream
+        // is repackaged without a re-encode.
+        success = gpr_convert_gpr_to_gpr( &allocator, &params, &input_buffer, &output_buffer );
+    }
+#endif
     else
     {
         printf( "Unsupported conversion from %s to %s \n", input_file_path, output_file_path );
