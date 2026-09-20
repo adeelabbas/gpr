@@ -368,11 +368,47 @@ void parse_tuning_info( cJSON* pTuningInfo, gpr_tuning_info& tuning_info )
     tuning_info.noise_offset = pJSON->valuedouble;
     pJSON = pJSON->next;
 
-    tuning_info.warp_red_coefficient = pJSON->valuedouble;
-    pJSON = pJSON->next;
+    {
+        cJSON* child = pJSON->child;
+        tuning_info.warp.planes = child->valueint;
+        child = child->next;
 
-    tuning_info.warp_blue_coefficient = pJSON->valuedouble;
-    pJSON = pJSON->next;
+        tuning_info.warp.flags = child->valueint;
+        child = child->next;
+
+        tuning_info.warp.center_x = child->valuedouble;
+        child = child->next;
+
+        tuning_info.warp.center_y = child->valuedouble;
+        child = child->next;
+
+        {
+            cJSON* val = child->child;
+            for (int p = 0; p < GPR_WARP_MAX_PLANES; p++)
+            {
+                for (int i = 0; i < 4; i++)
+                {
+                    tuning_info.warp.radial[p][i] = val->valuedouble;
+                    val = val->next;
+                }
+            }
+            child = child->next;
+        }
+
+        {
+            cJSON* val = child->child;
+            for (int p = 0; p < GPR_WARP_MAX_PLANES; p++)
+            {
+                for (int i = 0; i < 2; i++)
+                {
+                    tuning_info.warp.tangential[p][i] = val->valuedouble;
+                    val = val->next;
+                }
+            }
+        }
+
+        pJSON = pJSON->next;
+    }
 
     if( pJSON->child )
     {

@@ -492,6 +492,28 @@ ostream& operator<<(ostream& output, const gpr_crop_info& x)
 
     return output;
 }
+
+ostream& operator<<(ostream& output, const gpr_warp_rectilinear& x)
+{
+    start_tag( "warp", output );
+
+    print_val( output, "planes", x.planes );
+
+    print_val( output, "flags", x.flags );
+
+    print_val( output, "center_x", x.center_x );
+
+    print_val( output, "center_y", x.center_y );
+
+    print_val( output, "radial", (const double*)x.radial, GPR_WARP_MAX_PLANES * 4 );
+
+    print_val( output, "tangential", (const double*)x.tangential, GPR_WARP_MAX_PLANES * 2, true );
+
+    end_tag( "warp", output );
+
+    return output;
+}
+
 ostream& operator<<(ostream& output, const gpr_tuning_info& x)
 {
     start_tag( "tuning_info", output );
@@ -510,9 +532,8 @@ ostream& operator<<(ostream& output, const gpr_tuning_info& x)
 
     print_val( output, "noise_offset", x.noise_offset );
 
-    print_val( output, "warp_red_coefficient", x.warp_red_coefficient );
+    print_val( output, "warp", x.warp );
 
-    print_val( output, "warp_blue_coefficient", x.warp_blue_coefficient );
 
     print_val( output, "gain_map", x.gain_map );
 

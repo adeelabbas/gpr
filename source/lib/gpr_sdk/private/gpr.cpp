@@ -550,7 +550,63 @@ static void convert_dng_exif_to_dng_exif_info( gpr_exif_info* dst_exif, const dn
 
 #define MAX_BUF_SIZE (65*65*4*sizeof(float))
 
-static char _warp_rect_buffer [256];
+// Exposes the protected warp parameters of a WarpRectilinear opcode reconstructed
+// from its serialized form (the class offers no public accessor).
+class gpr_warp_rectilinear_reader : public dng_opcode_WarpRectilinear
+{
+public:
+    explicit gpr_warp_rectilinear_reader( dng_stream &stream ) : dng_opcode_WarpRectilinear( stream ) {}
+
+    const dng_warp_params_rectilinear& Params() const { return fWarpParams; }
+};
+
+// Decodes a WarpRectilinear opcode into tuning_info's warp struct by serializing it
+// (same framing as OpcodeList storage: minVersion, flags, then PutData) and reparsing.
+// Leaves warp.planes == 0 if the opcode cannot be represented.
+static void read_warp_rectilinear_opcode( dng_opcode &opcode, gpr_warp_rectilinear &warp )
+{
+    if ( opcode.OpcodeID() != dngOpcode_WarpRectilinear )
+        return;
+
+    try
+    {
+        char buffer [256];
+
+        dng_stream stream ( buffer, sizeof(buffer) );
+
+        stream.Put_uint32 ( opcode.MinVersion() );
+        stream.Put_uint32 ( opcode.Flags() );
+
+        opcode.PutData( stream );
+
+        stream.SetReadPosition( 0 );
+
+        gpr_warp_rectilinear_reader reader ( stream );
+
+        const dng_warp_params_rectilinear &params = reader.Params();
+
+        if ( params.fPlanes > GPR_WARP_MAX_PLANES )
+            return;
+
+        warp.planes   = params.fPlanes;
+        warp.flags    = opcode.Flags();
+        warp.center_x = params.fCenter.h;
+        warp.center_y = params.fCenter.v;
+
+        for ( uint32 p = 0; p < params.fPlanes; p++ )
+        {
+            for ( int i = 0; i < 4; i++ )
+                warp.radial[p][i] = params.fRadParams[p][i];
+
+            warp.tangential[p][0] = params.fTanParams[p][0];
+            warp.tangential[p][1] = params.fTanParams[p][1];
+        }
+    }
+    catch ( ... )
+    {
+        warp.planes = 0;
+    }
+}
 
 static bool read_dng(const gpr_allocator*       allocator,
                            dng_stream*          dng_read_stream,
@@ -888,24 +944,7 @@ static bool read_dng(const gpr_allocator*       allocator,
                 // Note: this code will have to get smarter if we ever have anything other than one WarpRectilinear tag in OpcodeList3
                 if ( count == 1 )
                 {
-                    // Get WarpRectilinear Opcode
-                    dng_opcode &opcode = opcodelist3.Entry( 0 );
-                    
-                    dng_stream stream ( _warp_rect_buffer, 256 );
-                    opcode.PutData( stream );
-                    
-                    // Ugly way to get the parameters, but I couldn't figure how else to get access to the data
-                    double red_coefficient = * (double *) &_warp_rect_buffer[8];
-                    double blue_coefficient = * (double *) &_warp_rect_buffer[8 + 2*6*8];
-                    //LogPrint( "WarpRectilinear red = %f, blue = %f ", red_coefficient, blue_coefficient );
-                    
-                    tuning_info.warp_red_coefficient = red_coefficient;
-                    tuning_info.warp_blue_coefficient = blue_coefficient;
-                }
-                else
-                {
-                    tuning_info.warp_red_coefficient = 0;
-                    tuning_info.warp_blue_coefficient = 0;
+                    read_warp_rectilinear_opcode( opcodelist3.Entry( 0 ), tuning_info.warp );
                 }
             }
         }
@@ -1387,22 +1426,32 @@ static void write_dng(const gpr_allocator*          allocator,
             }
         }
 
-       // WarpRectilinear - aka chromatic aberration correction (applied after demosaicking (OpcodeList3))
-        if ( tuning_info->warp_red_coefficient > 0 && tuning_info->warp_blue_coefficient > 0 )
+        // WarpRectilinear (OpcodeList3, applied after demosaicking): chromatic aberration
+        // and/or geometric lens distortion correction, written at full fidelity from tuning_info
+        if ( gpr_warp_rectilinear_is_valid( &tuning_info->warp ) )
         {
-            dng_opcode_list &opcodelist3 = negative->OpcodeList3 ();
+            const gpr_warp_rectilinear &warp = tuning_info->warp;
 
-            dng_warp_params_rectilinear chromatic_aberration;
+            dng_warp_params_rectilinear warp_params;
 
-            chromatic_aberration.fPlanes = 3;
-            chromatic_aberration.fCenter = dng_point_real64( 0.5, 0.5 );
-            chromatic_aberration.fRadParams[0][0] = tuning_info->warp_red_coefficient;
-            chromatic_aberration.fRadParams[1][0] = 1.0;
-            chromatic_aberration.fRadParams[2][0] = tuning_info->warp_blue_coefficient;
+            warp_params.fPlanes = warp.planes;
+            warp_params.fCenter = dng_point_real64( warp.center_y, warp.center_x );
 
-            AutoPtr<dng_opcode> warp_opcode ( new dng_opcode_WarpRectilinear ( chromatic_aberration, 0x03 ));
+            for ( uint32 p = 0; p < warp.planes; p++ )
+            {
+                for ( int i = 0; i < 4; i++ )
+                    warp_params.fRadParams[p][i] = warp.radial[p][i];
 
-            opcodelist3.Append( warp_opcode );
+                warp_params.fTanParams[p][0] = warp.tangential[p][0];
+                warp_params.fTanParams[p][1] = warp.tangential[p][1];
+            }
+
+            if ( warp_params.IsValid() )
+            {
+                AutoPtr<dng_opcode> warp_opcode ( new dng_opcode_WarpRectilinear ( warp_params, warp.flags ));
+
+                negative->OpcodeList3 ().Append( warp_opcode );
+            }
         }
     }
     
