@@ -1476,7 +1476,7 @@ bool gpr_convert_raw_to_dng(const gpr_allocator*    allocator,
                                   gpr_buffer*       inp_raw_buffer,
                                   gpr_buffer*       out_dng_buffer)
 {
-    TIMESTAMP("[BEG]", 1)
+    TIMESTAMP("[BEG]", 2)
     
     gpr_buffer_auto raw_buffer(allocator->Alloc, allocator->Free);
     raw_buffer.set( (char*)inp_raw_buffer->buffer, inp_raw_buffer->size );
@@ -1496,7 +1496,7 @@ bool gpr_convert_dng_to_raw(const gpr_allocator*    allocator,
                                   gpr_buffer*       inp_dng_buffer,
                                   gpr_buffer*       out_raw_buffer)
 {
-    TIMESTAMP("[BEG]", 1)
+    TIMESTAMP("[BEG]", 2)
     
     gpr_buffer_auto raw_buffer(allocator->Alloc, allocator->Free);
     
@@ -1525,7 +1525,7 @@ bool gpr_convert_dng_to_dng(const gpr_allocator*    allocator,
                                   gpr_buffer*       inp_dng_buffer,
                                   gpr_buffer*       out_dng_buffer)
 {
-    TIMESTAMP("[BEG]", 1)
+    TIMESTAMP("[BEG]", 2)
 
     gpr_buffer_auto raw_buffer(allocator->Alloc, allocator->Free);
 
@@ -1554,7 +1554,7 @@ bool gpr_convert_vc5_to_gpr(const gpr_allocator*    allocator,
                                   gpr_buffer*       inp_vc5_buffer,
                                   gpr_buffer*       out_gpr_buffer)
 {
-    TIMESTAMP("[BEG]", 1)
+    TIMESTAMP("[BEG]", 2)
 
     gpr_buffer_auto vc5_buffer(allocator->Alloc, allocator->Free);
     vc5_buffer.set( (char*)inp_vc5_buffer->buffer, inp_vc5_buffer->size );
@@ -1574,7 +1574,7 @@ bool gpr_convert_gpr_to_vc5(const gpr_allocator*            allocator,
                                   gpr_buffer*               inp_gpr_buffer,
                                   gpr_buffer*               out_vc5_buffer)
 {
-    TIMESTAMP("[BEG]", 1)
+    TIMESTAMP("[BEG]", 2)
     
     gpr_buffer_auto vc5_buffer(allocator->Alloc, allocator->Free);
     
@@ -1608,7 +1608,7 @@ bool gpr_convert_raw_to_gpr(const gpr_allocator*    allocator,
                                   gpr_buffer*       inp_raw_buffer,
                                   gpr_buffer*       out_gpr_buffer)
 {
-    TIMESTAMP("[BEG]", 1)
+    TIMESTAMP("[BEG]", 2)
     
     gpr_buffer_auto raw_buffer(allocator->Alloc, allocator->Free);
 
@@ -1630,7 +1630,7 @@ bool gpr_convert_dng_to_gpr(const gpr_allocator*    allocator,
                                   gpr_buffer*       inp_dng_buffer,
                                   gpr_buffer*       out_gpr_buffer)
 {
-    TIMESTAMP("[BEG]", 1)
+    TIMESTAMP("[BEG]", 2)
 
     gpr_buffer_auto raw_buffer(allocator->Alloc, allocator->Free);
     
@@ -1658,7 +1658,7 @@ bool gpr_convert_dng_to_vc5(const gpr_allocator*    allocator,
                                   gpr_buffer*       inp_dng_buffer,
                                   gpr_buffer*       out_vc5_buffer)
 {
-    TIMESTAMP("[BEG]", 1)
+    TIMESTAMP("[BEG]", 2)
 
     gpr_buffer_auto raw_buffer(allocator->Alloc, allocator->Free);
     gpr_buffer_auto vc5_buffer(allocator->Alloc, allocator->Free);
@@ -1692,7 +1692,7 @@ bool gpr_convert_gpr_to_rgb(const gpr_allocator*        allocator,
                                   gpr_buffer*           inp_gpr_buffer,
                                   gpr_rgb_buffer*       out_rgb_buffer)
 {
-    TIMESTAMP("[BEG]", 1)
+    TIMESTAMP("[BEG]", 2)
 
     gpr_parameters params;
 
@@ -1745,7 +1745,7 @@ bool gpr_convert_gpr_to_dng(const gpr_allocator*    allocator,
                                   gpr_buffer*       inp_gpr_buffer,
                                   gpr_buffer*       out_dng_buffer)
 {
-    TIMESTAMP("[BEG]", 1)
+    TIMESTAMP("[BEG]", 2)
 
     gpr_buffer_auto raw_buffer(allocator->Alloc, allocator->Free);
     gpr_buffer_auto vc5_buffer(allocator->Alloc, allocator->Free);
@@ -1775,7 +1775,7 @@ bool gpr_convert_vc5_to_dng(const gpr_allocator*    allocator,
                                   gpr_buffer*       inp_vc5_buffer,
                                   gpr_buffer*       out_dng_buffer)
 {
-    TIMESTAMP("[BEG]", 1)
+    TIMESTAMP("[BEG]", 2)
 
     gpr_buffer_auto vc5_buffer( allocator->Alloc, allocator->Free );
     
@@ -1796,7 +1796,7 @@ bool gpr_convert_gpr_to_raw(const gpr_allocator*            allocator,
                                   gpr_buffer*               inp_gpr_buffer,
                                   gpr_buffer*               out_raw_buffer)
 {
-    TIMESTAMP("[BEG]", 1)
+    TIMESTAMP("[BEG]", 2)
 
     gpr_buffer_auto raw_buffer(allocator->Alloc, allocator->Free);
     
@@ -1824,7 +1824,7 @@ bool gpr_convert_gpr_to_raw(const gpr_allocator*            allocator,
 bool gpr_check_vc5( const gpr_allocator*        allocator,
                           gpr_buffer*           inp_dng_buffer)
 {
-    TIMESTAMP("[BEG]", 1)
+    TIMESTAMP("[BEG]", 2)
     
     gpr_buffer_auto raw_buffer(allocator->Alloc, allocator->Free);
     gpr_buffer_auto vc5_buffer(allocator->Alloc, allocator->Free);
