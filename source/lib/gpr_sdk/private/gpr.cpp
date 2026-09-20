@@ -54,6 +54,7 @@
 #include "macros.h"
 #include "gpr_buffer.h"
 #include "gpr_buffer_auto.h"
+#include "gpr_rgb.h"
 
 #if GPR_READING
 #include "vc5_decoder.h"
@@ -995,135 +996,6 @@ static bool read_dng(const gpr_allocator*       allocator,
     return true;
 }
 
-
-void reduction(double a[][6], int size, int pivot, int col) 
-{
-   int i, j;
-   double factor;
-   factor = a[pivot][col];
- 
-   for (i = 0; i < 2 * size; i++) {
-      a[pivot][i] /= factor;
-   }
- 
-   for (i = 0; i < size; i++) {
-      if (i != pivot) {
-         factor = a[i][col];
-         for (j = 0; j < 2 * size; j++) {
-            a[i][j] = a[i][j] - a[pivot][j] * factor;
-         }
-      }
-   }
-}
-
-void calc_color_matrix( double in_matrix[3][3], double wb[3], double weight, double out_matrix[3][3] )
-{
-    double temp1[3][3];
-    double temp2[3][3];
-
-    int i,j,k;
-
-#if PRINT_MATRIX
-    LogPrint("\nOriginal Matrix");
-    for (i = 0; i < 3; i++)
-      LogPrint("%8.5f  %8.5f  %8.5f", in_matrix[i][0], in_matrix[i][1], in_matrix[i][2] );
-#endif
-    
-    // Interpolate with identity matrix by weight w
-    double w = weight;
-    double z = 1.0 - weight;
-
-    for (i = 0; i < 3; i++ )
-    {
-        for (j = 0; j < 3; j++ )
-            temp1[i][j] = in_matrix[i][j] * w;
-
-        temp1[i][i] += z;
-    }
-
-#if PRINT_MATRIX
-    LogPrint("\nInterpolated Matrix");
-    for (i = 0; i < 3; i++)
-      LogPrint("%8.5f  %8.5f  %8.5f", temp1[i][0], temp1[i][1], temp1[i][2] );
-#endif
-    
-    // Multiply matrix by sRGB_to_XYZd50 (from http://www.brucelindbloom.com)
-    double sRGB_to_XYZd50[3][3] = {{0.4361, 0.3851, 0.1431}, {0.2225, 0.7169, 0.0606}, {0.0139, 0.0971, 0.7142}};
-
-    double sum;
-    for (i = 0; i < 3; i++) 
-        for (j = 0; j < 3; j++) 
-        {
-            sum = 0;
-            for (k = 0; k < 3; k++) 
-                sum = sum + sRGB_to_XYZd50[i][k] * temp1[k][j];
-
-            temp2[i][j] = sum;
-        }
-
-#if PRINT_MATRIX
-    LogPrint("\ntimes  sRGB_to_XYZd50");
-    for (i = 0; i < 3; i++)
-      LogPrint("%8.5f  %8.5f  %8.5f", temp2[i][0], temp2[i][1], temp2[i][2] );
-#endif
-    
-    // Set up diagonal matrix with white balance gains
-    double wb_diag[3][3];
-    for (i = 0; i < 3; i++) 
-    {
-        for (j = 0; j < 3; j++) 
-            wb_diag[i][j] = 0.0;
-        
-        wb_diag[i][i] = wb[i];
-    }
-    
-    // Multiply by white balance gains
-    for (i = 0; i < 3; i++) 
-        for (j = 0; j < 3; j++) 
-        {
-            sum = 0;
-            for (k = 0; k < 3; k++) 
-                sum = sum + temp2[i][k] * wb_diag[k][j];
-
-            temp1[i][j] = sum;
-        }
-
-#if PRINT_MATRIX
-    LogPrint("\ntimes  wb");
-    for (i = 0; i < 3; i++)
-      LogPrint("%8.5f  %8.5f  %8.5f", temp1[i][0], temp1[i][1], temp1[i][2] );
-#endif
-    
-    // Invert the resulting matrix
-    double matrix[3][6];
-
-    for (i = 0; i < 3; i++)
-      for (j = 0; j < 6; j++)
-         if (j == i + 3)
-            matrix[i][j] = 1;
-         else 
-            matrix[i][j] = 0;
-
-    for (i = 0; i < 3; i++)
-      for (j = 0; j < 3; j++)
-         matrix[i][j] = temp1[i][j];
-
-    for (i = 0; i < 3; i++)
-      reduction(matrix, 3, i, i);
-
-    for (i = 0; i < 3; i++)
-      for (j = 0; j < 3; j++)
-         out_matrix[i][j] = matrix[i][j+3];
-
-#if PRINT_MATRIX
-    LogPrint("\nInverse Matrix");
-    for (i = 0; i < 3; i++) {
-       LogPrint("%8.5f  %8.5f  %8.5f", out_matrix[i][0], out_matrix[i][1], out_matrix[i][2] );
-    }
-#endif
-
-}
-
 typedef struct
 {
     unsigned char*     orig_dst;                     /* Address to the memory location that this buffer points to */
@@ -1534,13 +1406,13 @@ static void write_dng(const gpr_allocator*          allocator,
         if ( matrix_weighting < 0.0 || matrix_weighting > 1.0 )
             matrix_weighting = 1.0;
     
-        calc_color_matrix( profile_info->cam_to_srgb_1, profile_info->wb1, matrix_weighting, out_matrix );
+        compute_xyz_to_camera_color_matrix( profile_info->cam_to_srgb_1, profile_info->wb1, matrix_weighting, out_matrix );
     
         for (i = 0; i < 3; i++)
             for (j = 0; j < 3; j++)
                 mColor1[i][j] = out_matrix[i][j];
     
-        calc_color_matrix( profile_info->cam_to_srgb_2, profile_info->wb2, matrix_weighting, out_matrix );
+        compute_xyz_to_camera_color_matrix( profile_info->cam_to_srgb_2, profile_info->wb2, matrix_weighting, out_matrix );
     
         for (i = 0; i < 3; i++)
             for (j = 0; j < 3; j++)
@@ -1556,15 +1428,6 @@ static void write_dng(const gpr_allocator*          allocator,
             }
     }
    
-#if PRINT_MATRIX
-    LogPrint("CM1:");
-    for (i = 0; i < 3; i++)
-            LogPrint("  %8.5f  %8.5f  %8.5f", mColor1[i][0], mColor1[i][1], mColor1[i][2] );
-    LogPrint("CM2:");
-    for (i = 0; i < 3; i++)
-            LogPrint("  %8.5f  %8.5f  %8.5f", mColor2[i][0], mColor2[i][1], mColor2[i][2] );
-#endif
-    
     prof->SetColorMatrix1((dng_matrix) mColor1);
     prof->SetColorMatrix2((dng_matrix) mColor2);
     
