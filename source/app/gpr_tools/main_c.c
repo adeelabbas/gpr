@@ -127,6 +127,42 @@ static unsigned int pixel_format_get_bits(GPR_PIXEL_FORMAT p)
     }
 }
 
+// The --quality level names, in quantizer order (smallest files first); parsing and the
+// diagnostic both read this table.
+static const struct
+{
+    const char*         name;
+    GPR_QUALITY_SETTING level;
+
+} quality_levels[] =
+{
+    { "low",    GPR_QUALITY_SETTING_LOW    },
+    { "medium", GPR_QUALITY_SETTING_MEDIUM },
+    { "high",   GPR_QUALITY_SETTING_HIGH   },
+    { "fs1",    GPR_QUALITY_SETTING_FS1    },
+    { "fsx",    GPR_QUALITY_SETTING_FSX    },
+    { "fs2",    GPR_QUALITY_SETTING_FS2    },
+    { "ultra",  GPR_QUALITY_SETTING_ULTRA  },
+};
+
+// Maps a --quality level name (any case, like the other option values) to its enum.
+// Returns 1 on match, 0 otherwise.
+static int parse_quality( const char* s, GPR_QUALITY_SETTING* out )
+{
+    size_t i;
+
+    for( i = 0; i < sizeof(quality_levels) / sizeof(quality_levels[0]); i++ )
+    {
+        if( stricmp( s, quality_levels[i].name ) == 0 )
+        {
+            *out = quality_levels[i].level;
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 // Maps a downscale ratio string to its enum. Returns 1 on match, 0 otherwise.
 static int parse_ratio( const char* ratio, GPR_RGB_RESOLUTION* out )
 {
@@ -174,6 +210,7 @@ int dng_convert_main( const dng_convert_params* convert_params )
     int          rgb_file_bits          = convert_params->rgb_file_bits;
     int          jpg_quality            = convert_params->jpg_quality;
     const char*  preview                = convert_params->preview;
+    const char*  quality                = convert_params->quality;
 
     bool success;
     bool write_buffer_to_file = true;
@@ -389,6 +426,34 @@ int dng_convert_main( const dng_convert_params* convert_params )
         }
     }
 
+    // --quality picks the VC-5 quantizer table used whenever the image is encoded to GPR.
+    // Omitted means the encoder default. It means nothing for other output types, so asking
+    // for it there is an error rather than a silent no-op.
+    if( quality != NULL && strcmp(quality, "") )
+    {
+        if( output_file_type != FILE_TYPE_GPR )
+        {
+            fprintf( stderr, "--quality is only supported for GPR output\n" );
+            return -1;
+        }
+
+        if( parse_quality( quality, &params.quality ) == 0 )
+        {
+            size_t i;
+
+            fprintf( stderr, "Invalid quality `%s'; valid choices:", quality );
+            for( i = 0; i < sizeof(quality_levels) / sizeof(quality_levels[0]); i++ )
+                fprintf( stderr, " %s", quality_levels[i].name );
+            fprintf( stderr, "\n" );
+
+            return -1;
+        }
+
+        // A GPR input is otherwise repackaged as-is, and a quantizer table can only apply to a
+        // fresh encode, so ask for one. The other conversions always encode and ignore this.
+        params.reencode = true;
+    }
+
     gpr_buffer output_buffer = { NULL, 0 };
 
     // input_skip_rows/cols shift the start of the raw image to adjust its Bayer phase
@@ -498,10 +563,11 @@ int dng_convert_main( const dng_convert_params* convert_params )
     else if( input_file_type == FILE_TYPE_GPR && output_file_type == FILE_TYPE_GPR )
     {
         // Rewrites the container around the existing vc5 bitstream with updated metadata. When
-        // --preview requests an auto-generated thumbnail (a downscale ratio), the SDK falls
-        // back to a full re-encode to produce it -- so this can still be used to add or refresh
-        // the preview on a GPR file, e.g. one that was written without a preview. With
-        // --preview omitted (or set to a jpg file, which is embedded as-is) the vc5 bitstream
+        // --quality asks for a re-encode (params.reencode), or --preview requests an auto-generated
+        // thumbnail (a downscale ratio) that only the encoder produces, the SDK decodes and
+        // re-encodes the image instead -- so this can also add or refresh the preview on a GPR
+        // file, e.g. one that was written without a preview. With both omitted (or --preview
+        // set to a jpg file, which is embedded as-is) the vc5 bitstream
         // is repackaged without a re-encode.
         success = gpr_convert_gpr_to_gpr( &allocator, &params, &input_buffer, &output_buffer );
     }

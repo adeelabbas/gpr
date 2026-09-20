@@ -369,6 +369,42 @@ static inline gpr_crop_info parse_crop_info(const dng_ifd &rawIFD, const AutoPtr
 }
 
 #if GPR_WRITING
+
+// GPR_QUALITY_SETTING (gpr.h) is the SDK's name for the encoder's VC5_ENCODER_QUALITY_SETTING,
+// the way GPR_PIXEL_FORMAT stands for VC5_ENCODER_PIXEL_FORMAT: gpr.h is the customer's header
+// and cannot include vc5_encoder.h, which exists only in builds that write. The levels are
+// therefore declared twice and tied together here. If the two ever disagree this stops
+// compiling, which is what lets set_vc5_encoder_parameters hand the value over with a cast
+// instead of a mapping. (A negative array size rather than static_assert, because the SDK
+// still builds as C++98.)
+#define QUALITY_SETTING_MATCHES( level ) \
+    typedef char gpr_quality_setting_##level##_matches[ ( (int)GPR_QUALITY_SETTING_##level == (int)VC5_ENCODER_QUALITY_SETTING_##level ) ? 1 : -1 ]
+
+QUALITY_SETTING_MATCHES( LOW );
+QUALITY_SETTING_MATCHES( MEDIUM );
+QUALITY_SETTING_MATCHES( HIGH );
+QUALITY_SETTING_MATCHES( FS1 );
+QUALITY_SETTING_MATCHES( FSX );
+QUALITY_SETTING_MATCHES( FS2 );
+QUALITY_SETTING_MATCHES( ULTRA );
+QUALITY_SETTING_MATCHES( COUNT );
+QUALITY_SETTING_MATCHES( DEFAULT );
+
+#undef QUALITY_SETTING_MATCHES
+
+// A quality outside the enum would reach the encoder's table lookup as-is: vc5_encoder_process
+// silently keeps its built-in table for a value past the end, and a negative one reads out of
+// bounds on compilers that type enums as int. The conversion fails instead.
+static bool quality_is_valid( const gpr_parameters* parameters )
+{
+    if( (unsigned int)parameters->quality < (unsigned int)GPR_QUALITY_SETTING_COUNT )
+        return true;
+
+    LogPrint( "Invalid quality setting %d (valid: 0 to %d)", (int)parameters->quality, (int)GPR_QUALITY_SETTING_COUNT - 1 );
+
+    return false;
+}
+
 // shading_tables backs the preview's lens shading correction and is only read when the
 // encode runs, so the caller owns it and must keep it alive until EncodeVc5Image returns.
 static void set_vc5_encoder_parameters( vc5_encoder_parameters& vc5_encoder_params, const gpr_parameters* convert_params,
@@ -412,7 +448,7 @@ static void set_vc5_encoder_parameters( vc5_encoder_parameters& vc5_encoder_para
             break;
     }
     
-    vc5_encoder_params.quality_setting = VC5_ENCODER_QUALITY_SETTING_FS1;
+    vc5_encoder_params.quality_setting = (VC5_ENCODER_QUALITY_SETTING)convert_params->quality;
 
     // Resolution and rendering parameters of the embedded preview. The preview pipeline
     // consumes the RGB output as 8-bit (it is re-encoded as JPEG), so rgb_bits stays at 8.
@@ -468,6 +504,8 @@ void gpr_parameters_set_defaults(gpr_parameters* x)
     x->enable_preview = true;
 
     x->preview_resolution = GPR_RGB_RESOLUTION_DEFAULT;
+
+    x->quality = GPR_QUALITY_SETTING_DEFAULT;
 
     x->reencode = false;
 
@@ -2251,6 +2289,9 @@ bool gpr_convert_raw_to_gpr(const gpr_allocator*    allocator,
                                   gpr_buffer*       out_gpr_buffer)
 {
     TIMESTAMP("[BEG]", 2)
+
+    if( quality_is_valid( parameters ) == false )
+        return false;
     
     gpr_buffer_auto raw_buffer(allocator->Alloc, allocator->Free);
 
@@ -2275,6 +2316,9 @@ bool gpr_convert_dng_to_gpr(const gpr_allocator*    allocator,
                                   gpr_buffer*       out_gpr_buffer)
 {
     TIMESTAMP("[BEG]", 2)
+
+    if( quality_is_valid( parameters ) == false )
+        return false;
 
     gpr_buffer_auto raw_buffer(allocator->Alloc, allocator->Free);
     
@@ -2383,6 +2427,9 @@ bool gpr_convert_gpr_to_gpr(const gpr_allocator*    allocator,
 #endif
 
     const bool needs_encode = needs_encoded_thumbnail || parameters->reencode;
+
+    if( needs_encode && quality_is_valid( parameters ) == false )
+        return false;
 
     if( needs_encode == false )
     {

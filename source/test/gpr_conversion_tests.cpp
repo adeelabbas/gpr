@@ -1680,6 +1680,124 @@ static void run_lens_correction_cli_tests( const std::string& data_dir )
 }
 
 // ---------------------------------------------------------------------------
+// gpr_tools --quality (dng_convert_main)
+//
+// Selects the VC-5 quantizer table used whenever the image is encoded to GPR.
+// Omitted means the encoder default (Filmscan-X). A GPR input is repackaged
+// unless --quality asks for a re-encode; other output types reject it. Uses
+// the sample run_preview_cli_tests loaded (g_cli_sample), so it runs after it.
+// ---------------------------------------------------------------------------
+
+static void run_quality_cli_tests()
+{
+    std::fprintf( stdout, "\n== gpr_tools --quality (dng_convert_main) ==\n" );
+
+    if( g_cli_sample.empty() )
+    {
+        run_case( "--quality: CLI sample", []{ check( false, "run_preview_cli_tests must run first (no CLI sample loaded)" ); } );
+        return;
+    }
+
+    run_case( "quality defaults: Film Scan X, and no re-encode, from gpr_parameters_set_defaults", []{
+        check( GPR_QUALITY_SETTING_DEFAULT == GPR_QUALITY_SETTING_FSX, "the default level is Film Scan X" );
+
+        gpr_parameters params;
+        gpr_parameters_set_defaults( &params );
+        check( params.quality == GPR_QUALITY_SETTING_DEFAULT, "gpr_parameters_set_defaults gives the default level" );
+        check( params.reencode == false, "gpr_parameters_set_defaults does not ask for a re-encode" );
+        gpr_parameters_destroy( &params, g_alloc.Free );
+    });
+
+    // A DNG input always encodes. Each level quantizes the highpass bands finer than the one
+    // before it, so every step up must produce a larger file: the size is the independent
+    // evidence that a different table was applied. Omitting --quality must give the fsx bytes
+    // exactly, since that is the default and nothing else about the encode may differ.
+    run_case( "--quality=<level> on a DNG input: files grow with quality, omitted equals fsx", []{
+        const std::string dng = scratch_path( "quality_src.DNG" );
+        dng_convert_params pd = preview_cli_params( g_cli_sample.c_str(), dng.c_str(), "" );
+        check( dng_convert_main( &pd ) == 0, "GPR -> DNG succeeds" );
+
+        const std::string out_default = scratch_path( "quality_default.GPR" );
+        dng_convert_params p0 = preview_cli_params( dng.c_str(), out_default.c_str(), "" );
+        check( dng_convert_main( &p0 ) == 0, "default encode succeeds" );
+
+        Buffer d;
+        check( load_file( out_default.c_str(), d ), "default output written" );
+        std::remove( out_default.c_str() );
+
+        const char* levels[] = { "low", "medium", "high", "fs1", "fsx", "fs2", "ultra" };
+        size_t prev = 0;
+        for( size_t i = 0; i < sizeof(levels) / sizeof(levels[0]); ++i )
+        {
+            const std::string out = scratch_path( "quality_level.GPR" );
+            dng_convert_params p = preview_cli_params( dng.c_str(), out.c_str(), "" );
+            p.quality = levels[i];
+            check( dng_convert_main( &p ) == 0, "conversion succeeds" );
+
+            Buffer o;
+            const bool loaded = load_file( out.c_str(), o );
+            std::remove( out.c_str() );
+            check( loaded, "output written" );
+            if( !loaded ) continue;
+
+            validate_dng_like( o, g_cli_W, g_cli_H, /*vc5=*/true );
+            check( o.b.size > prev, "larger than the previous level" );
+            prev = o.b.size;
+
+            if( std::strcmp( levels[i], "fsx" ) == 0 && d.valid() )
+                check( o.b.size == d.b.size && std::memcmp( o.b.buffer, d.b.buffer, o.b.size ) == 0,
+                       "fsx output byte-identical to the default output" );
+        }
+        std::remove( dng.c_str() );
+    });
+
+    // A GPR input is repackaged without --quality; with it, the SDK decodes and re-encodes at
+    // the level. Every bundled sample is encoded far above CineForm Low, so a `low` re-encode
+    // has to come out well under the repackaged file while still being a valid vc5 GPR.
+    run_case( "--quality on a GPR input re-encodes it; omitted repackages", []{
+        const std::string out_repack = scratch_path( "quality_repack.GPR" );
+        dng_convert_params pr = preview_cli_params( g_cli_sample.c_str(), out_repack.c_str(), "" );
+        check( dng_convert_main( &pr ) == 0, "repackage succeeds" );
+
+        const std::string out_low = scratch_path( "quality_low.GPR" );
+        dng_convert_params pl = preview_cli_params( g_cli_sample.c_str(), out_low.c_str(), "" );
+        pl.quality = "low";
+        check( dng_convert_main( &pl ) == 0, "re-encode at low succeeds" );
+
+        Buffer r, l;
+        const bool loaded = load_file( out_repack.c_str(), r ) && load_file( out_low.c_str(), l );
+        std::remove( out_repack.c_str() );
+        std::remove( out_low.c_str() );
+        check( loaded, "outputs written" );
+        if( !loaded ) return;
+
+        validate_dng_like( r, g_cli_W, g_cli_H, /*vc5=*/true );
+        validate_dng_like( l, g_cli_W, g_cli_H, /*vc5=*/true );
+        check( l.b.size < r.b.size, "low re-encode smaller than the repackaged camera bitstream" );
+    });
+
+    run_case( "--quality=<garbage> fails, no output", []{
+        const char* bad[] = { "best", "fs3", "1", "fsx " };
+        for( size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); ++i )
+        {
+            const std::string out = scratch_path( "quality_bad.GPR" );
+            dng_convert_params p = preview_cli_params( g_cli_sample.c_str(), out.c_str(), "" );
+            p.quality = bad[i];
+            check( dng_convert_main( &p ) != 0, "conversion reports failure" );
+            check_no_output( out );
+        }
+    });
+
+    run_case( "--quality with DNG output fails, no output", []{
+        const std::string out = scratch_path( "quality_dng.DNG" );
+        dng_convert_params p = preview_cli_params( g_cli_sample.c_str(), out.c_str(), "" );
+        p.quality = "fs2";
+        check( dng_convert_main( &p ) != 0, "conversion reports failure" );
+        check_no_output( out );
+    });
+}
+
+// ---------------------------------------------------------------------------
 // Command-line scanning (program_options_lite)
 //
 // Unknown options and options missing their value must be flagged as fatal via
@@ -1896,6 +2014,8 @@ int main( int argc, char* argv[] )
     run_preview_cli_tests( std::string(data_dir) + "/Hero6/GOPR0024.GPR" );
 
     run_lens_correction_cli_tests( data_dir );
+
+    run_quality_cli_tests();
 
     run_argument_parser_tests();
 

@@ -41,6 +41,26 @@
 
         } gpr_preview_image;
       
+        /* Quality of a GPR encode: which quantizer table is applied to the wavelet highpass
+           bands, from the smallest files (LOW) to the highest fidelity (ULTRA). The levels are
+           those of the VC-5 encoder (VC5_ENCODER_QUALITY_SETTING in vc5_encoder.h) under the
+           SDK's own names, with identical values: gpr.cpp checks that at compile time. */
+        typedef enum
+        {
+            GPR_QUALITY_SETTING_LOW,                           // Low (smallest files)
+            GPR_QUALITY_SETTING_MEDIUM,                        // Medium
+            GPR_QUALITY_SETTING_HIGH,                          // High
+            GPR_QUALITY_SETTING_FS1,                           // Film Scan 1
+            GPR_QUALITY_SETTING_FSX,                           // Film Scan X
+            GPR_QUALITY_SETTING_FS2,                           // Film Scan 2
+            GPR_QUALITY_SETTING_ULTRA,                         // Ultra (largest files, highest fidelity)
+
+            GPR_QUALITY_SETTING_COUNT,
+
+            GPR_QUALITY_SETTING_DEFAULT = GPR_QUALITY_SETTING_FSX,
+
+        } GPR_QUALITY_SETTING;
+
         typedef struct
         {
             unsigned int        input_width;                   /* Width of input source in pixels (only applies to raw input) */
@@ -65,6 +85,11 @@
 
             GPR_RGB_RESOLUTION  preview_resolution; /* Resolution of the generated RGB preview (2:1, 4:1, 8:1, 16:1) */
 
+            GPR_QUALITY_SETTING quality;        /* Quality used whenever the image is encoded to GPR:
+                                                   GPR_QUALITY_SETTING_DEFAULT (Film Scan X) from
+                                                   gpr_parameters_set_defaults. A value outside the enum fails
+                                                   the conversion. Changes nothing about how a file is read. */
+
             bool                reencode;       /* gpr_convert_gpr_to_gpr only: decode the input and encode it
                                                    again (at quality, with the preview settings) instead of
                                                    repackaging its vc5 bitstream. false from
@@ -87,6 +112,8 @@
         void gpr_parameters_destroy(gpr_parameters* x, gpr_free mem_free);
 
         //!< Fill gpr_parameters from the metadata (EXIF, profile, tuning) of a DNG/GPR file.
+        //!< Initialize parameters with gpr_parameters_set_defaults first: what the file does not
+        //!< carry (quality, reencode, the preview settings) keeps whatever the caller left there.
         bool gpr_parameters_parse_dng(const gpr_allocator*      allocator,
                                             gpr_buffer*         inp_dng_buffer,
                                             gpr_parameters*     parameters);
@@ -152,7 +179,7 @@
                                           gpr_buffer*       inp_dng_buffer,
                                           gpr_buffer*       out_gpr_buffer);
 
-        //!< dng to vc5 conversion
+        //!< dng to vc5 conversion (encodes at the default quality; it takes no gpr_parameters)
         bool gpr_convert_dng_to_vc5(const gpr_allocator*    allocator,
                                           gpr_buffer*       inp_dng_buffer,
                                           gpr_buffer*       out_vc5_buffer);
