@@ -55,6 +55,9 @@ public:
 
     string  gpmf_path;
 
+    string  lens_correction;
+    string  lens_correction_strength;
+
     string  rgb_resolution;
     
     int     output_ppm_bits;
@@ -96,6 +99,18 @@ public:
                                                                             "Choices: GPR, DNG. Use to write a GPR encoded file with DNG extension \n"
                                                                             "(DNG format with GPR extension is not allowed)")
         ("gpmf_path,g",             gpmf_path,            string(""),       "GPMF file path")
+
+        ("lens_correction",         lens_correction,      string(""),       "Write a geometric lens-distortion correction (DNG output only) \n"
+                                                                            "auto: use the built-in profile for the source camera model \n"
+                                                                            "k0,k1,k2,k3[,cx,cy]: explicit WarpRectilinear radial coefficients \n"
+                                                                            "(optical center defaults to 0.5,0.5). When not set, only a \n"
+                                                                            "camera-original warp (if any) is carried over")
+
+        ("lens_correction_strength", lens_correction_strength, string(""),  "Strength of the geometric correction, 0..1 \n"
+                                                                            "1 = fully rectilinear (straightest lines, heaviest crop) \n"
+                                                                            "0 = no correction (full fisheye field of view kept) \n"
+                                                                            "Default: the camera profile's recommended strength for \n"
+                                                                            "--lens_correction=auto (0.6), 1 for explicit coefficients")
 
         ("rgb_resolution",          rgb_resolution,       string(""),       "Output RGB resolution. Only applicable when output format is PPM or JPG \n"
                                                                             "Choices: 1:1, 2:1, [4:1], 8:1. 16:1")
@@ -197,6 +212,8 @@ int main(int argc, char *argv [])
         convert_params.output_format           = args.output_format.c_str();
         convert_params.metadata_file_path      = args.apply_metadata.c_str();
         convert_params.gpmf_file_path          = args.gpmf_path.c_str();
+        convert_params.lens_correction         = args.lens_correction.c_str();
+        convert_params.lens_correction_strength = args.lens_correction_strength.c_str();
         convert_params.rgb_file_resolution     = args.rgb_resolution.c_str();
         convert_params.rgb_file_bits           = args.output_ppm_bits;
         convert_params.preview                 = args.preview.c_str();

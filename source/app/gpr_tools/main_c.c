@@ -35,6 +35,7 @@
 #if GPR_JPEG_AVAILABLE
 #include "jpeg.h"
 #endif
+#include "gpr_lens_profiles.h"
 
 #define MAX_FILE_PATH 256
 
@@ -158,6 +159,8 @@ int dng_convert_main( const dng_convert_params* convert_params )
     const char*  output_format          = convert_params->output_format;
     const char*  metadata_file_path     = convert_params->metadata_file_path;
     const char*  gpmf_file_path         = convert_params->gpmf_file_path;
+    const char*  lens_correction        = convert_params->lens_correction;
+    const char*  lens_strength_arg      = convert_params->lens_correction_strength;
     const char*  rgb_file_resolution    = convert_params->rgb_file_resolution;
     int          rgb_file_bits          = convert_params->rgb_file_bits;
     const char*  preview                = convert_params->preview;
@@ -287,6 +290,93 @@ int dng_convert_main( const dng_convert_params* convert_params )
     if( gpmf_file_path != NULL && strcmp(gpmf_file_path, "") )
     {
         read_from_file( &params.gpmf_payload, gpmf_file_path, allocator.Alloc, allocator.Free );
+    }
+
+    // Synthesize a geometric lens-distortion warp (OpcodeList3 WarpRectilinear).
+    // DNG output only: GPR consumers expect camera-original metadata, and a GPR
+    // repackage must stay faithful, so this never applies to other output types.
+    if( ( lens_correction == NULL || strcmp(lens_correction, "") == 0 ) &&
+        lens_strength_arg != NULL && strcmp(lens_strength_arg, "") )
+    {
+        fprintf( stderr, "--lens_correction_strength requires --lens_correction\n" );
+        return -1;
+    }
+
+    if( lens_correction != NULL && strcmp(lens_correction, "") )
+    {
+        if( output_file_type != FILE_TYPE_DNG )
+        {
+            fprintf( stderr, "--lens_correction is only supported for DNG output\n" );
+            return -1;
+        }
+
+        // Strength: -1 = not given; "auto" then uses the profile's recommended
+        // strength, explicit coefficients are used as-is (strength 1).
+        double strength = -1.0;
+
+        if( lens_strength_arg != NULL && strcmp(lens_strength_arg, "") )
+        {
+            char trailing;
+
+            if( sscanf( lens_strength_arg, "%lf%c", &strength, &trailing ) != 1 ||
+                strength < 0.0 || strength > 1.0 )
+            {
+                fprintf( stderr, "Invalid lens_correction_strength `%s'; expected a value in 0..1\n",
+                         lens_strength_arg );
+                return -1;
+            }
+        }
+
+        GPR_LENS_PROFILE_RESULT lens_result;
+
+        if( stricmp(lens_correction, "auto") == 0 )
+        {
+            lens_result = gpr_parameters_apply_lens_profile( &params, strength );
+
+            if( lens_result == GPR_LENS_PROFILE_NOT_FOUND )
+            {
+                fprintf( stderr, "No built-in lens profile for camera model `%s'; "
+                                 "pass explicit coefficients as --lens_correction=k0,k1,k2,k3[,cx,cy]\n",
+                                 params.exif_info.camera_model );
+                return -1;
+            }
+        }
+        else
+        {
+            double k0, k1, k2, k3, cx = 0.5, cy = 0.5;
+
+            int scanned = sscanf( lens_correction, "%lf,%lf,%lf,%lf,%lf,%lf", &k0, &k1, &k2, &k3, &cx, &cy );
+
+            if( scanned != 4 && scanned != 6 )
+            {
+                fprintf( stderr, "Invalid lens_correction `%s'; valid choices: auto, or k0,k1,k2,k3[,cx,cy]\n",
+                         lens_correction );
+                return -1;
+            }
+
+            gpr_warp_rectilinear geo;
+            memset( &geo, 0, sizeof(geo) );
+
+            geo.planes   = 3;
+            geo.flags    = 0x02;    // mandatory, may be skipped for previews
+            geo.center_x = cx;
+            geo.center_y = cy;
+
+            for( int p = 0; p < 3; p++ )
+            {
+                geo.radial[p][0] = k0;
+                geo.radial[p][1] = k1;
+                geo.radial[p][2] = k2;
+                geo.radial[p][3] = k3;
+            }
+
+            lens_result = gpr_parameters_apply_lens_warp( &params, &geo, strength );
+        }
+
+        if( lens_result == GPR_LENS_PROFILE_ALREADY_GEOMETRIC )
+        {
+            fprintf( stderr, "Input already carries a geometric lens correction; --lens_correction ignored\n" );
+        }
     }
 
     gpr_buffer output_buffer = { NULL, 0 };

@@ -39,6 +39,20 @@ extern "C" {
         const char*     output_format;           /* Optional override of the format implied by the output file extension (GPR or DNG) */
         const char*     metadata_file_path;
         const char*     gpmf_file_path;
+
+        const char*     lens_correction;         /* Geometric lens-distortion correction, DNG output only.
+                                                    NULL or empty: carry over a camera-original warp
+                                                    unchanged. "auto": look up the built-in profile for
+                                                    the source camera model (fails when there is none).
+                                                    "k0,k1,k2,k3[,cx,cy]": explicit WarpRectilinear radial
+                                                    coefficients, center defaulting to 0.5,0.5. */
+
+        const char*     lens_correction_strength; /* Strength of the geometric correction, "0".."1".
+                                                    1 = fully rectilinear (heaviest crop), 0 = none.
+                                                    NULL or empty: the camera profile's recommended
+                                                    strength for "auto", 1.0 for explicit
+                                                    coefficients. */
+
         const char*     rgb_file_resolution;
         int             rgb_file_bits;
 
