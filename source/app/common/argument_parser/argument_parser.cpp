@@ -57,10 +57,10 @@ void argument_parser::set_options()
 int argument_parser::parse(int argc, char *argv [], const char* application_text, const char* prefix_text)
 {
     argument_count = argc;
-    
+
     for (int i = 0; i < argument_count; i++)
         arguments[i] = argv[i];
-    
+
     set_options();
     
     program_options_lite::setDefaults(command_options);
@@ -101,7 +101,7 @@ int argument_parser::parse(int argc, char *argv [], const char* application_text
         print_help();
         return -1;
     }
-    
+
     if( application_text )
     {
         if( prefix_text )

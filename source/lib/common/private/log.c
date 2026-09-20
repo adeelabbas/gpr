@@ -34,7 +34,7 @@ bool LogInit(void)
 int LogPrint(const char* format, ... )
 {
     StopTimer(&LogTimer);
-    
+
 	printf("[%5d-ms] ", (unsigned int)TimeMSecs(&LogTimer));
 
 	{

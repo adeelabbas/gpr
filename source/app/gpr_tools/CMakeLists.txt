@@ -33,7 +33,7 @@ include_directories( "../../lib/gpr_sdk/public" )
 
 if(EXISTS "${CMAKE_SOURCE_DIR}/source/lib/tiny_jpeg")
   include_directories( "../../lib/tiny_jpeg" )
-  add_definitions("-DGPR_JPEG_AVAILABLE=1")  
+  add_definitions("-DGPR_JPEG_AVAILABLE=1")
 else(EXISTS "${CMAKE_SOURCE_DIR}/source/lib/tiny_jpeg")
   add_definitions("-DGPR_JPEG_AVAILABLE=0")
 endif(EXISTS "${CMAKE_SOURCE_DIR}/source/lib/tiny_jpeg")

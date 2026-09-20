@@ -27,7 +27,7 @@ typedef struct timer
 {
     clock_t begin;
     clock_t elapsed;
-    
+
 } TIMER;
 
 #ifdef __cplusplus

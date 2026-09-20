@@ -206,7 +206,7 @@ static bool gInitializedXMP = false;
 void dng_xmp_sdk::InitializeSDK (dng_xmp_namespace * extraNamespaces,
 								 const char *software)
 	{
-	
+
 	if (!gInitializedXMP)
 		{
 		
@@ -328,7 +328,7 @@ void dng_xmp_sdk::InitializeSDK (dng_xmp_namespace * extraNamespaces,
 
 void dng_xmp_sdk::TerminateSDK ()
 	{
-	
+
 	if (gInitializedXMP)
 		{
 		

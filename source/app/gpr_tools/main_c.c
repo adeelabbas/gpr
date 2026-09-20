@@ -201,7 +201,7 @@ int dng_convert_main(const char*  input_file_path, unsigned int input_width, uns
     {
         read_from_file( &params.gpmf_payload, gpmf_file_path, allocator.Alloc, allocator.Free );
     }
-    
+
     gpr_buffer output_buffer = { NULL, 0 };
 
     if( input_skip_rows > 0 )
@@ -302,7 +302,7 @@ int dng_convert_main(const char*  input_file_path, unsigned int input_width, uns
             printf("JPG writing capability is disabled. You could still write to a PPM file");
 #endif
         }
-        
+
         allocator.Free( rgb_buffer.buffer );
     }
     else if( input_file_type == FILE_TYPE_GPR && output_file_type == FILE_TYPE_DNG )

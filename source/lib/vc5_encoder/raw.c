@@ -30,12 +30,12 @@ static void UnpackPixel_14(uint16_t *input_row1_ptr, uint16_t *input_row2_ptr, i
 {
     uint16_t R1, G1, G2, B1;
     uint16_t GS, GD, RG, BG;
-    
+
     uint16_t *GS_output_row_ptr = (uint16_t *)output_buffer[0];
     uint16_t *GD_output_row_ptr = (uint16_t *)output_buffer[3];
     uint16_t *RG_output_row_ptr = (uint16_t *)output_buffer[1];
     uint16_t *BG_output_row_ptr = (uint16_t *)output_buffer[2];
-    
+
     const int internal_precision = 12;
     const int32_t midpoint = (1 << (internal_precision - 1));
 
@@ -53,7 +53,7 @@ static void UnpackPixel_14(uint16_t *input_row1_ptr, uint16_t *input_row2_ptr, i
         R1 = input_row2_ptr[2 * column + 0];
         G2 = input_row2_ptr[2 * column + 1];
     }
-    
+
     // Apply protune log curve
     R1 = EncoderLogCurve[ R1 >> 2 ];
     G1 = EncoderLogCurve[ G1 >> 2 ];
@@ -214,15 +214,15 @@ static void UnpackPixel_12(uint16_t *input_row1_ptr, uint16_t *input_row2_ptr, i
 {
     uint16_t R1, G1, G2, B1;
     uint16_t GS, GD, RG, BG;
-    
+
     uint16_t *GS_output_row_ptr = (uint16_t *)output_buffer[0];
     uint16_t *GD_output_row_ptr = (uint16_t *)output_buffer[3];
     uint16_t *RG_output_row_ptr = (uint16_t *)output_buffer[1];
     uint16_t *BG_output_row_ptr = (uint16_t *)output_buffer[2];
-    
+
     const int internal_precision = 12;
     const int32_t midpoint = (1 << (internal_precision - 1));
-    
+
     if( rggb )
     {
         R1 = input_row1_ptr[2 * column + 0];
@@ -237,7 +237,7 @@ static void UnpackPixel_12(uint16_t *input_row1_ptr, uint16_t *input_row2_ptr, i
         R1 = input_row2_ptr[2 * column + 0];
         G2 = input_row2_ptr[2 * column + 1];
     }
-    
+
     // Apply protune log curve
     R1 = EncoderLogCurve[ R1 ];
     G1 = EncoderLogCurve[ G1 ];
@@ -283,7 +283,7 @@ static void UnpackPixel_12_8x_NEON_(uint16_t *input_row1_ptr, uint16_t *input_ro
     }
     
     int16x8_t R1, G1, G2, B1;
-    
+
     if( rggb )
     {
         R1 = vreinterpretq_s16_u16( row_1.val[0] );
@@ -397,19 +397,19 @@ static void UnpackPixel_12P(uint16_t *input_row1_ptr, uint16_t *input_row2_ptr, 
 {
     uint16_t R1, G1, G2, B1;
     uint16_t GS, GD, RG, BG;
-    
+
     const int internal_precision = 12;
     const int32_t midpoint = (1 << (internal_precision - 1));
-    
+
     const unsigned int byte_offset = (column * 3);
-    
+
     { // read first row data
         uint8_t* row1_ptr = (uint8_t*)input_row1_ptr;
-        
+
         unsigned char byte_0 = row1_ptr[byte_offset + 0];
         unsigned char byte_1 = row1_ptr[byte_offset + 1];
         unsigned char byte_2 = row1_ptr[byte_offset + 2];
-        
+
         if( rggb )
         {
             R1 = (byte_0)      + ((byte_1 & 0x0f) << 8);
@@ -421,14 +421,14 @@ static void UnpackPixel_12P(uint16_t *input_row1_ptr, uint16_t *input_row2_ptr, 
             B1 = (byte_2 << 4) + ((byte_1 & 0xf0) >> 4);
         }
     }
-    
+
     { // read second row data
         uint8_t* row2_ptr = (uint8_t*)input_row2_ptr;
-        
+
         unsigned char byte_0 = row2_ptr[byte_offset + 0];
         unsigned char byte_1 = row2_ptr[byte_offset + 1];
         unsigned char byte_2 = row2_ptr[byte_offset + 2];
-        
+
         if( rggb )
         {
             G2 = (byte_0)      + ((byte_1 & 0x0f) << 8);

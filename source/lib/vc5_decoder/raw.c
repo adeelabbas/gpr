@@ -123,7 +123,7 @@ CODEC_ERROR PackComponentsToRAW(const UNPACKED_IMAGE *image,
                     output_row2_ptr[2 * column + 0] = (uint16_t)R;
                     output_row2_ptr[2 * column + 1] = (uint16_t)G2;
                     break;
-                    
+
                 default:
                     assert(0);
                     break;

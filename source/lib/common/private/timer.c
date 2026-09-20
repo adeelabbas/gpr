@@ -22,7 +22,7 @@
 
 /*!
 	@brief Initialize a timer
-	
+
 	The frequency of the performance timer is determined if it has not
 	already been obtained.
  */

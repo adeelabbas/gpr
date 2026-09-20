@@ -1247,7 +1247,7 @@ bool dng_shared::ParseTag (dng_stream &stream,
 						   uint64 tagOffset,
 						   int64 /* offsetDelta */)
 	{
-	
+
 	if (parentCode == 0)
 		{
 		

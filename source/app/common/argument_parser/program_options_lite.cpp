@@ -323,7 +323,7 @@ namespace program_options_lite
         size_t arg_opt_start = arg.find_first_not_of('-');
         string option = arg.substr(arg_opt_start);
         /* lookup option */
-        
+
         /* argument in argv[1] */
         /* xxx, need to handle case where option isn't required */
         if (argc == 1)
@@ -332,7 +332,7 @@ namespace program_options_lite
             return 0; /* run out of argv for argument */
         }
         storePair(opts, false, true, option, string(argv[1]));
-        
+
         return 1;
     }
     

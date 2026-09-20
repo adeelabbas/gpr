@@ -61,7 +61,7 @@
             gpr_preview_image   preview_image;  /* Preview JPG image */
             
             bool                enable_preview;
-          
+
             gpr_exif_info       exif_info;      /* Exif info object */
             
             gpr_profile_info    profile_info;   /* Camera color profile info object */
@@ -71,11 +71,11 @@
         } gpr_parameters;
         
         void gpr_parameters_set_defaults(gpr_parameters* x);
-        
+
         void gpr_parameters_construct_copy(const gpr_parameters* y, gpr_parameters* x);
-        
+
         void gpr_parameters_destroy(gpr_parameters* x, gpr_free mem_free);
-        
+
         //!< Parse Metadata of DNG File and return in gpr_parameters struct
         bool gpr_parse_metadata(const gpr_allocator*            allocator,
                                       gpr_buffer*               inp_dng_buffer,
@@ -85,7 +85,7 @@
         bool gpr_check_vc5( gpr_buffer* inp_dng_buffer, gpr_malloc mem_alloc, gpr_free mem_free );
         
         //!< CONVERSION FUNCTIONS
-        
+
         //!< raw to dng conversion
         bool gpr_convert_raw_to_dng(const gpr_allocator*    allocator,
                                     const gpr_parameters*   parameters,
@@ -102,7 +102,7 @@
                                     const gpr_parameters*   parameters,
                                           gpr_buffer*       inp_dng_buffer,
                                           gpr_buffer*       out_dng_buffer);
-        
+
         //!< vc5 to gpr conversion
         bool gpr_convert_vc5_to_gpr(const gpr_allocator*    allocator,
                                     const gpr_parameters*   parameters,
@@ -113,7 +113,7 @@
         bool gpr_convert_gpr_to_vc5(const gpr_allocator*    allocator,
                                           gpr_buffer*       inp_gpr_buffer,
                                           gpr_buffer*       out_vc5_buffer);
-        
+
 #if GPR_WRITING
 
         //!< raw to gpr conversion
@@ -133,17 +133,17 @@
                                           gpr_buffer*       inp_dng_buffer,
                                           gpr_buffer*       out_vc5_buffer);
 #endif // GPR_WRITING
-        
+
 
 #if GPR_READING
 
         //!< gpr to rgb conversion
         bool gpr_convert_gpr_to_rgb(const gpr_allocator*        allocator,
                                           GPR_RGB_RESOLUTION    rgb_resolution,
-                                          int                   rgb_bits,                                    
+                                          int                   rgb_bits,
                                           gpr_buffer*           inp_gpr_buffer,
                                           gpr_rgb_buffer*       out_rgb_buffer);
-        
+
         //!< gpr to dng conversion
         bool gpr_convert_gpr_to_dng(const gpr_allocator*    allocator,
                                     const gpr_parameters*   parameters,
@@ -155,7 +155,7 @@
                                     const gpr_parameters*   parameters,
                                           gpr_buffer*       inp_vc5_buffer,
                                           gpr_buffer*       out_dng_buffer);
-        
+
         //!< gpr to raw conversion
         bool gpr_convert_gpr_to_raw(const gpr_allocator*    allocator,
                                           gpr_buffer*       inp_gpr_buffer,

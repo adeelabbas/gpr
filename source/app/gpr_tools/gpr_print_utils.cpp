@@ -487,13 +487,13 @@ ostream& operator<<(ostream& output, const gpr_tuning_info& x)
     print_val( output, "noise_offset", x.noise_offset );
 
     print_val( output, "warp_red_coefficient", x.warp_red_coefficient );
-    
+
     print_val( output, "warp_blue_coefficient", x.warp_blue_coefficient );
-    
+
     print_val( output, "gain_map", x.gain_map );
-    
+
     print_val( output, "pixel_format", x.pixel_format, 0, true );
-    
+
     end_tag( "tuning_info", output );
 
     return output;

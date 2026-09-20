@@ -123,7 +123,7 @@ typedef struct _encoder_parameters
     GPR_RGB_RESOLUTION  rgb_resolution;
 
     gpr_rgb_gain        rgb_gain;
-    
+
 } ENCODER_PARAMETERS;
 
 #ifdef __cplusplus

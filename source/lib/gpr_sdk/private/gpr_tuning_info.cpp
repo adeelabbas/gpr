@@ -77,7 +77,7 @@ void gpr_tuning_info_set_defaults( gpr_tuning_info* x )
     _ae_info_set_defaults(&x->ae_info);
     
     _gain_map_set_defaults( x );
-    
+
     x->pixel_format = PIXEL_FORMAT_RGGB_14;
 }
 

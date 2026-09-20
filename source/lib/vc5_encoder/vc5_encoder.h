@@ -43,7 +43,7 @@
         VC5_ENCODER_PIXEL_FORMAT_GBRG_12 = 3,           // GBRG 12bit pixels packed into 16bits
         
         VC5_ENCODER_PIXEL_FORMAT_GBRG_12P = 4,          // GBRG 12bit pixels packed into 12bits
-        
+
         VC5_ENCODER_PIXEL_FORMAT_DEFAULT = VC5_ENCODER_PIXEL_FORMAT_RGGB_14,
         
     } VC5_ENCODER_PIXEL_FORMAT;
@@ -86,7 +86,7 @@
         gpr_malloc                  mem_alloc;              // Callback function to allocate memory
         
         gpr_free                    mem_free;               // Callback function to free memory
-        
+
     } vc5_encoder_parameters;
 
     void vc5_encoder_parameters_set_default(vc5_encoder_parameters* encoding_parameters);

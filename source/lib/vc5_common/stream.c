@@ -175,9 +175,9 @@ CODEC_ERROR PutWord(STREAM *stream, BITWORD word)
 	size_t written;
 
     word = Swap32(word);
-    
+
 	assert(stream != NULL);
-    
+
 	switch (stream->type)
 	{
 	case STREAM_TYPE_FILE:
@@ -189,8 +189,8 @@ CODEC_ERROR PutWord(STREAM *stream, BITWORD word)
 	case STREAM_TYPE_MEMORY:
         {
             uint8_t* buffer = (uint8_t *)stream->location.memory.buffer + stream->byte_count;
-            
-            memcpy(buffer, &word, sizeof(word));            
+
+            memcpy(buffer, &word, sizeof(word));
         }
 		break;
 
@@ -200,7 +200,7 @@ CODEC_ERROR PutWord(STREAM *stream, BITWORD word)
 	}
 
 	stream->byte_count += sizeof(word);
-    
+
 	return CODEC_ERROR_OKAY;
 }
 

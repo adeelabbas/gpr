@@ -51,7 +51,7 @@
         PIXEL_FORMAT_GBRG_12 = 3,                           // GBRG 12bit pixels packed into 16bits
         
         PIXEL_FORMAT_GBRG_12P = 4,                          // GBRG 12bit pixels packed into 12bits
-        
+
     } GPR_PIXEL_FORMAT;
 
     typedef enum
@@ -109,9 +109,9 @@
     typedef struct
     {
         char        *buffers[4];
-        
+
         uint32_t    size;
-        
+
     } gpr_gain_map;
 
     typedef struct
@@ -131,9 +131,9 @@
         
         double                  warp_red_coefficient;
         double                  warp_blue_coefficient;
-        
+
         gpr_gain_map            gain_map;
-        
+
         GPR_PIXEL_FORMAT        pixel_format;
 
     } gpr_tuning_info;

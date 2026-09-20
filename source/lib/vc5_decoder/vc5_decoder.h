@@ -41,7 +41,7 @@
         VC5_DECODER_PIXEL_FORMAT_GBRG_12 = 2,               // GBRG 12bit pixels packed into 16bits
         
         VC5_DECODER_PIXEL_FORMAT_GBRG_14 = 3,               // GBRG 12bit pixels packed into 16bits
-        
+
         VC5_DECODER_PIXEL_FORMAT_DEFAULT = VC5_DECODER_PIXEL_FORMAT_RGGB_14,
         
     } VC5_DECODER_PIXEL_FORMAT;
@@ -58,15 +58,15 @@
         VC5_DECODER_PIXEL_FORMAT        pixel_format;           // Bayer Ordering Pattern (Default: VC5_ENCODER_BAYER_ORDERING_RGGB)
         
         GPR_RGB_RESOLUTION              rgb_resolution;
-        
+
         int                             rgb_bits;
         
         gpr_rgb_gain                    rgb_gain;
         
         gpr_malloc                      mem_alloc;              // Callback function to allocate memory
-        
+
         gpr_free                        mem_free;               // Callback function to free memory
-        
+
     } vc5_decoder_parameters;
         
     void vc5_decoder_parameters_set_default(vc5_decoder_parameters* decoding_parameters);

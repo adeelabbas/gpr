@@ -785,7 +785,7 @@ CODEC_ERROR ImageUnpackingProcess(const PACKED_IMAGE *input,
         case PIXEL_FORMAT_RAW_GBRG_12P:
             UnpackImage_12P(input, output, enabled_parts, false );
             break;
-            
+
         default:
             assert(0);
             return CODEC_ERROR_PIXEL_FORMAT;

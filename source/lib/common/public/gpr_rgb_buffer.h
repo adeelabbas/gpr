@@ -39,7 +39,7 @@
             GPR_RGB_RESOLUTION_NONE      = 6,
 
             GPR_RGB_RESOLUTION_DEFAULT   = GPR_RGB_RESOLUTION_QUARTER,
-            
+
         } GPR_RGB_RESOLUTION;
 
 

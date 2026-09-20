@@ -96,12 +96,12 @@ namespace program_options_lite
         {}
         
         void parse(const std::string& arg);
-        
+
         void setDefault()
         {
             opt_storage = opt_default_val;
         }
-        
+
         T& opt_storage;
         T opt_default_val;
     };
@@ -160,7 +160,7 @@ namespace program_options_lite
     struct Options
     {
         ~Options();
-        
+
         OptionSpecific addOptions();
         
         struct Names
