@@ -129,7 +129,7 @@ int dng_dump(const char*  input_file_path)
 
     if( success )
     {
-        gpr_parameters_print( &params, NULL );
+        gpr_parameters_print_json( &params, NULL );
     }
     else
     {

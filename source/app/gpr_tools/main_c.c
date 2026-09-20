@@ -133,7 +133,7 @@ int dng_convert_main(const char*  input_file_path, unsigned int input_width, uns
   
     if( metadata_file_path && strcmp(metadata_file_path, "") )
     {
-        if( gpr_parameters_parse( &params, metadata_file_path ) != 0 )
+        if( gpr_parameters_parse_json( &params, metadata_file_path ) != 0 )
             return -1;
     }
     else if( input_file_type == FILE_TYPE_GPR || input_file_type == FILE_TYPE_DNG )
