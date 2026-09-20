@@ -54,6 +54,7 @@
 #include "macros.h"
 #include "gpr_buffer.h"
 #include "gpr_buffer_auto.h"
+#include "gpr_flat_write_stream.h"
 #include "gpr_rgb.h"
 
 #include "dng_stage1_negative.h"
@@ -2099,7 +2100,10 @@ bool gpr_convert_dng_to_dng(const gpr_allocator*    allocator,
 
     gpr_buffer_auto shifted_copy(allocator->Alloc, allocator->Free);
 
-    dng_memory_stream out_dng_stream( gDefaultDNGMemoryAllocator );
+    // Output of a metadata rewrite is about the size of the input, so reserving input size
+    // plus slack means the stream essentially never regrows; detach() then hands the buffer
+    // to the caller with no final copy.
+    gpr_flat_write_stream out_dng_stream( allocator->Alloc, allocator->Free, (uint64)inp_dng_buffer->size + (1 << 20) );
 
     if( fast )
     {
@@ -2110,7 +2114,7 @@ bool gpr_convert_dng_to_dng(const gpr_allocator*    allocator,
         write_dng( allocator, &out_dng_stream, adjust_bayer_phase( parameters, &raw_buffer, &shifted_copy ), false, NULL, parameters );
     }
 
-    write_dngstream_to_buffer( &out_dng_stream, out_dng_buffer, allocator->Alloc, allocator->Free );
+    out_dng_stream.detach( out_dng_buffer );
 
     TIMESTAMP("[END]", 1)
 
