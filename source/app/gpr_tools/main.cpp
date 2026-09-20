@@ -48,6 +48,7 @@ public:
     int     input_pitch;
     string  input_pixel_format;
     int     input_skip_rows;
+    int     input_skip_cols;
 
     string  output_path;
 
@@ -92,6 +93,7 @@ public:
         ("input_pixel_format,x",    input_pixel_format,   string(""),       "Input pixel format \n"
                                                                             "Choices: rggb12, rggb12p, [rggb14], gbrg12, gbrg12p, bggr12, bggr14 \n")
         ("input_skip_rows",         input_skip_rows,      0,                "Input image rows to skip (shifts Bayer phase, e.g. BGGR->GRBG)")
+        ("input_skip_cols",         input_skip_cols,      0,                "Input image columns to skip (shifts Bayer phase, e.g. BGGR->GBRG)")
 
         ("output_path,o",           output_path,          string(""),       "Output file path.\n"
                                                                             "File choices: GPR, DNG, PPM, RAW, JPG")
@@ -207,6 +209,7 @@ int main(int argc, char *argv [])
         convert_params.input_height            = args.input_height;
         convert_params.input_pitch             = args.input_pitch;
         convert_params.input_skip_rows         = args.input_skip_rows;
+        convert_params.input_skip_cols         = args.input_skip_cols;
         convert_params.input_pixel_format      = args.input_pixel_format.c_str();
         convert_params.output_file_path        = args.output_path.c_str();
         convert_params.output_format           = args.output_format.c_str();

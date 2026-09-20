@@ -33,6 +33,7 @@ extern "C" {
         unsigned int    input_height;
         size_t          input_pitch;
         size_t          input_skip_rows;
+        size_t          input_skip_cols;
         const char*     input_pixel_format;
 
         const char*     output_file_path;

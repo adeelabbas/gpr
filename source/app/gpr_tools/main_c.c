@@ -153,7 +153,7 @@ int dng_convert_main( const dng_convert_params* convert_params )
     // deliberately keep the caller's dng_convert_params untouched.
     const char*  input_file_path        = convert_params->input_file_path;
     size_t       input_skip_rows        = convert_params->input_skip_rows;
-    size_t       input_pitch            = convert_params->input_pitch;
+    size_t       input_skip_cols        = convert_params->input_skip_cols;
     const char*  input_pixel_format     = convert_params->input_pixel_format;
     const char*  output_file_path       = convert_params->output_file_path;
     const char*  output_format          = convert_params->output_format;
@@ -381,10 +381,12 @@ int dng_convert_main( const dng_convert_params* convert_params )
 
     gpr_buffer output_buffer = { NULL, 0 };
 
-    if( input_skip_rows > 0 )
-    {
-        input_buffer.buffer = (unsigned char*)(input_buffer.buffer) + (input_skip_rows * input_pitch);
-    }
+    // input_skip_rows/cols shift the start of the raw image to adjust its Bayer phase
+    // (e.g. BGGR -> GBRG). The shift is applied inside the SDK, right before encoding:
+    // for RAW input on the loaded pixel buffer, for DNG input on the decoded raw image
+    // (it cannot happen here for DNG, where input_buffer is the whole TIFF container).
+    params.input_skip_rows = input_skip_rows;
+    params.input_skip_cols = input_skip_cols;
 
     gpr_buffer preview_jpg = { NULL, 0 };
 
@@ -526,11 +528,6 @@ int dng_convert_main( const dng_convert_params* convert_params )
     else if( write_buffer_to_file )
     {
         write_to_file( &output_buffer, output_file_path );
-    }
-    
-    if( input_skip_rows > 0 )
-    {
-		input_buffer.buffer = (unsigned char*)(input_buffer.buffer) - (input_skip_rows * input_pitch);
     }
     
     if( preview_jpg.buffer )
