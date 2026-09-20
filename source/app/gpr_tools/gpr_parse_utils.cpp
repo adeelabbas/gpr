@@ -570,8 +570,9 @@ int gpr_parameters_parse_json( gpr_parameters* parameters, const char* input_fil
     parameters->input_pitch = pJSON->valueint;
     pJSON = pJSON->next;
 
-    parameters->fast_encoding = pJSON->valueint > 0 ? true : false;
-    pJSON = pJSON->next;
+    // Tolerate older JSON files that still carry the (now removed) fast_encoding field.
+    if( pJSON->string && strcmp( pJSON->string, "fast_encoding" ) == 0 )
+        pJSON = pJSON->next;
 
     parameters->gpmf_payload.size = pJSON->valueint;
     pJSON = pJSON->next;
