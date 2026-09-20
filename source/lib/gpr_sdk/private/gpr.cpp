@@ -211,6 +211,7 @@ static void set_vc5_encoder_parameters( vc5_encoder_parameters& vc5_encoder_para
     // Resolution and rendering parameters of the embedded preview. The preview pipeline
     // consumes the RGB output as 8-bit (it is re-encoded as JPEG), so rgb_bits stays at 8.
     RGB_PARAMETERS& rgb_params = vc5_encoder_params.rgb_params;
+    rgb_params.resolution = convert_params->preview_resolution;
     rgb_params.bits = 8;
 
     // Drive the preview's white balance from the image metadata (rather than the
@@ -254,6 +255,8 @@ void gpr_parameters_set_defaults(gpr_parameters* x)
     gpr_tuning_info_set_defaults(&x->tuning_info);
 
     x->enable_preview = true;
+
+    x->preview_resolution = GPR_RGB_RESOLUTION_DEFAULT;
 
     x->compute_md5sum = false;
 }

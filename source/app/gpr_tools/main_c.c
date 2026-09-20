@@ -247,7 +247,7 @@ int dng_convert_main(const char*  input_file_path, unsigned int input_width, uns
     {
         gpr_rgb_buffer rgb_buffer = { NULL, 0, 0, 0 };
 
-        GPR_RGB_RESOLUTION rgb_resolution = GPR_RGB_RESOLUTION_DEFAULT;
+        GPR_RGB_RESOLUTION rgb_resolution = GPR_RGB_RESOLUTION_QUARTER;
         
         if( strcmp(rgb_file_resolution, "1:1") == 0 )
             rgb_resolution = GPR_RGB_RESOLUTION_FULL;

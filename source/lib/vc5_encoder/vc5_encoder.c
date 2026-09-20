@@ -34,7 +34,6 @@ void vc5_encoder_parameters_set_default(vc5_encoder_parameters* encoding_paramet
     encoding_parameters->mem_free  = free;
 
     rgb_parameters_set_default(&encoding_parameters->rgb_params);
-    encoding_parameters->rgb_params.resolution = VC5_ENCODER_RGB_RESOLUTION_DEFAULT;
 }
 
 CODEC_ERROR vc5_encoder_process(const vc5_encoder_parameters*   encoding_parameters,    /* vc5 encoding parameters */

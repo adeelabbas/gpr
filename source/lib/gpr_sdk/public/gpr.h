@@ -63,6 +63,8 @@
             
             bool                enable_preview;
 
+            GPR_RGB_RESOLUTION  preview_resolution; /* Resolution of the generated RGB preview (2:1, 4:1, 8:1, 16:1) */
+
             gpr_exif_info       exif_info;      /* Exif info object */
             
             gpr_profile_info    profile_info;   /* Camera color profile info object */

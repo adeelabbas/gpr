@@ -53,8 +53,6 @@
         
     } VC5_ENCODER_PIXEL_FORMAT;
 
-    #define VC5_ENCODER_RGB_RESOLUTION_DEFAULT GPR_RGB_RESOLUTION_SIXTEENTH
-        
     /*!
      @brief Quality setting of the VC5 encoder
      */
