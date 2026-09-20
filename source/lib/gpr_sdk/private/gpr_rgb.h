@@ -35,6 +35,8 @@
 #endif
 
     void compute_xyz_to_camera_color_matrix( double in_matrix[3][3], double wb[3], double weight, double out_matrix[3][3] );
+    
+    bool compute_camera_to_srgb_color_matrix( const gpr_tuning_info* tuning_info, const gpr_profile_info* profile_info, float out_matrix[3][3] );
 
 #ifdef __cplusplus
     }

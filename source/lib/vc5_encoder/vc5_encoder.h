@@ -23,6 +23,7 @@
 #include "types.h"
 #include "gpr_buffer.h"
 #include "gpr_rgb_buffer.h"
+#include "rgb.h"
 #include "vc5_common.h"
 
 #ifdef __cplusplus
@@ -91,6 +92,11 @@
         gpr_malloc                  mem_alloc;              // Callback function to allocate memory
         
         gpr_free                    mem_free;               // Callback function to free memory
+
+        RGB_PARAMETERS              rgb_params;             // Resolution (Default: none) and rendering parameters (white balance,
+                                                            // black level, color matrix, baseline exposure, output bits) of the
+                                                            // RGB preview/thumbnail generated during encoding. The preview
+                                                            // embedding pipeline expects the default 8 rgb_bits.
 
     } vc5_encoder_parameters;
 

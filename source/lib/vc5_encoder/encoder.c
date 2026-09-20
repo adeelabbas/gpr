@@ -367,14 +367,14 @@ CODEC_ERROR EncodeImage(IMAGE *image, STREAM *stream, RGB_IMAGE *rgb_image, ENCO
 		return error;
 	}
     
-    if( rgb_image != NULL && parameters->rgb_resolution == GPR_RGB_RESOLUTION_SIXTEENTH )
+    if( rgb_image != NULL && parameters->rgb_params.resolution == GPR_RGB_RESOLUTION_SIXTEENTH )
     { // Thumbnail
         SetupDecoderLogCurve();
 
         WaveletToRGB(parameters->allocator,
                      encoder.transform[0].wavelet[2]->data[LL_BAND], encoder.transform[1].wavelet[2]->data[LL_BAND], encoder.transform[2].wavelet[2]->data[LL_BAND],
                      encoder.transform[0].wavelet[2]->width, encoder.transform[0].wavelet[2]->height, encoder.transform[0].wavelet[2]->width,
-                     rgb_image, 14, 8, &parameters->rgb_gain );
+                     rgb_image, 14, &parameters->rgb_params );
     }
     
     error = ReleaseComponentArrays( &parameters->allocator, &unpacked_image, unpacked_image.component_count );

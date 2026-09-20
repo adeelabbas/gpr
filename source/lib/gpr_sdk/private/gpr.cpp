@@ -102,6 +102,23 @@ void find_rational(float number, float error_tolerance, int* numerator, int* den
     *denominator_pow2 = _den_pow2;
 }
 
+// Convert the sensor black level carried in the metadata into the 16-bit linear domain used
+// by WaveletToRGB. The unpack + log-curve pipeline maps a native raw value v to ~v*65535/white
+// in that domain, so the black pedestal must be scaled the same way. Returns 0 when there is no
+// black level (e.g. GoPro), which makes the subtraction a no-op.
+static int compute_rgb_black_level( const gpr_tuning_info* tuning_info )
+{
+    const gpr_static_black_level& b = tuning_info->static_black_level;
+
+    int black = ( b.r_black + b.g_r_black + b.g_b_black + b.b_black ) / 4;
+    int white = tuning_info->dgain_saturation_level.level_red;
+
+    if( black <= 0 || white <= 0 )
+        return 0;
+
+    return (int)( (int64_t)black * 65535 / white );
+}
+
 static void unpack_pixel_format( const gpr_buffer_auto* input_buffer, const gpr_parameters* convert_params, gpr_buffer_auto* output_buffer )
 {
     size_t buffer_size = convert_params->input_height * convert_params->input_width * 2;
@@ -192,6 +209,41 @@ static void set_vc5_encoder_parameters( vc5_encoder_parameters& vc5_encoder_para
     }
     
     vc5_encoder_params.quality_setting = VC5_ENCODER_QUALITY_SETTING_FS1;
+
+    // Resolution and rendering parameters of the embedded preview. The preview pipeline
+    // consumes the RGB output as 8-bit (it is re-encoded as JPEG), so rgb_bits stays at 8.
+    RGB_PARAMETERS& rgb_params = vc5_encoder_params.rgb_params;
+    rgb_params.bits = 8;
+
+    // Drive the preview's white balance from the image metadata (rather than the
+    // hardcoded GoPro defaults), so previews of non-GoPro sources (e.g. iPhone) are
+    // not colour-cast. Mirrors the gain setup on the decode path.
+    gpr_rgb_gain& rgb_gain = rgb_params.white_balance_gain;
+    find_rational( convert_params->tuning_info.wb_gains.r_gain, 0.125, &rgb_gain.r_gain_num, &rgb_gain.r_gain_pow2_den );
+    find_rational( convert_params->tuning_info.wb_gains.g_gain, 0.125, &rgb_gain.g_gain_num, &rgb_gain.g_gain_pow2_den );
+    find_rational( convert_params->tuning_info.wb_gains.b_gain, 0.125, &rgb_gain.b_gain_num, &rgb_gain.b_gain_pow2_den );
+
+    // Remove the sensor black pedestal before the gains are applied, otherwise it tints the preview.
+    rgb_params.black_level = compute_rgb_black_level( &convert_params->tuning_info );
+
+    // Camera -> sRGB color matrix and baseline exposure from the DNG metadata, so the
+    // embedded preview renders with the same colors as the RGB decode path (which sets
+    // the same fields on the decoder in gpr_convert_gpr_to_rgb, including the rationale
+    // for skipping a positive exposure when the source carries GainMap opcodes).
+    compute_camera_to_srgb_color_matrix( &convert_params->tuning_info, &convert_params->profile_info, rgb_params.color_matrix );
+
+    {
+        const bool maps_carry_gain = convert_params->tuning_info.has_opcode_gain_maps;
+
+        float baseline_exposure = (float)convert_params->tuning_info.baseline_exposure;
+
+        if ( maps_carry_gain && baseline_exposure > 0.0f )
+        {
+            baseline_exposure = 0.0f;
+        }
+
+        rgb_params.baseline_exposure = baseline_exposure;
+    }
 }
 #endif
 
@@ -1909,15 +1961,48 @@ bool gpr_convert_gpr_to_rgb(const gpr_allocator*        allocator,
     vc5_decoder_params.mem_free         = allocator->Free;
     vc5_decoder_params.pixel_format     = VC5_DECODER_PIXEL_FORMAT_DEFAULT;
 
-    vc5_decoder_params.rgb_bits = rgb_bits;
+    RGB_PARAMETERS& rgb_params = vc5_decoder_params.rgb_params;
+    rgb_params.bits = rgb_bits;
 
-    gpr_rgb_gain&   rgb_gain = vc5_decoder_params.rgb_gain;
+    gpr_rgb_gain&   rgb_gain = rgb_params.white_balance_gain;
 
     find_rational( params.tuning_info.wb_gains.r_gain, 0.125, &rgb_gain.r_gain_num, &rgb_gain.r_gain_pow2_den );
     find_rational( params.tuning_info.wb_gains.g_gain, 0.125, &rgb_gain.g_gain_num, &rgb_gain.g_gain_pow2_den );
     find_rational( params.tuning_info.wb_gains.b_gain, 0.125, &rgb_gain.b_gain_num, &rgb_gain.b_gain_pow2_den );
 
-    vc5_decoder_params.rgb_resolution = rgb_resolution;
+    // Camera -> sRGB color matrix from the DNG color profile, so the RGB output renders
+    // accurate hues instead of treating white-balanced camera RGB as if it were sRGB
+    // (see WaveletToRGB). Identity when the profile is missing or degenerate.
+    compute_camera_to_srgb_color_matrix( &params.tuning_info, &params.profile_info, rgb_params.color_matrix );
+
+    // Baseline exposure from the DNG (EV), applied as linear gain ahead of the tone curve
+    // like DNG renderers do; 0 when the source does not set it.
+    //
+    // A positive exposure is dropped when the source's gain maps carry real gain. The
+    // camera calibrates BaselineExposure against a renderer whose highlight shoulder has
+    // headroom this pipeline's tone curve does not: measured on MISSION1-50MP (+1.48 EV),
+    // honoring it alongside the gains clips 14% of the frame where Apple's RAW pipeline,
+    // reading the same tag and the same maps, clips none.
+    //
+    // A negative exposure only darkens and cannot clip, so it stays honored either way
+    // (e.g. HERO5, -0.3 EV, which also carries gain maps).
+    {
+        const bool maps_carry_gain = params.tuning_info.has_opcode_gain_maps;
+
+        float baseline_exposure = (float)params.tuning_info.baseline_exposure;
+
+        if ( maps_carry_gain && baseline_exposure > 0.0f )
+        {
+            baseline_exposure = 0.0f;
+        }
+
+        rgb_params.baseline_exposure = baseline_exposure;
+    }
+
+    // Remove the sensor black pedestal before the gains are applied, otherwise it tints the RGB output.
+    rgb_params.black_level = compute_rgb_black_level( &params.tuning_info );
+
+    rgb_params.resolution = rgb_resolution;
 
     if( vc5_decoder_process( &vc5_decoder_params, &vc5_buffer.get_gpr_buffer(), NULL, out_rgb_buffer ) != CODEC_ERROR_OKAY )
     {

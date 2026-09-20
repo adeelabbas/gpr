@@ -24,10 +24,7 @@ void vc5_decoder_parameters_set_default(vc5_decoder_parameters* decoding_paramet
     
     decoding_parameters->pixel_format = VC5_DECODER_PIXEL_FORMAT_DEFAULT;
     
-    decoding_parameters->rgb_resolution = VC5_DECODER_RGB_RESOLUTION_DEFAULT;
-    decoding_parameters->rgb_bits = 8;
-    
-    gpr_rgb_gain_set_defaults(&decoding_parameters->rgb_gain);
+    rgb_parameters_set_default(&decoding_parameters->rgb_params);
 }
 
 CODEC_ERROR vc5_decoder_process(const vc5_decoder_parameters*   decoding_parameters,    /* vc5 decoding parameters */
@@ -49,13 +46,11 @@ CODEC_ERROR vc5_decoder_process(const vc5_decoder_parameters*   decoding_paramet
     
     parameters.enabled_parts   = decoding_parameters->enabled_parts;    
     
-    parameters.rgb_resolution  = decoding_parameters->rgb_resolution;
-    parameters.rgb_bits        = decoding_parameters->rgb_bits;
-    parameters.rgb_gain        = decoding_parameters->rgb_gain;
+    parameters.rgb_params      = decoding_parameters->rgb_params;
     
     if( rgb_buffer == NULL )
     {
-        parameters.rgb_resolution = GPR_RGB_RESOLUTION_NONE;
+        parameters.rgb_params.resolution = GPR_RGB_RESOLUTION_NONE;
     }
         
     parameters.allocator.Alloc = decoding_parameters->mem_alloc;
@@ -112,7 +107,7 @@ CODEC_ERROR vc5_decoder_process(const vc5_decoder_parameters*   decoding_paramet
         return error;
     }
     
-    if( parameters.rgb_resolution != GPR_RGB_RESOLUTION_NONE )
+    if( parameters.rgb_params.resolution != GPR_RGB_RESOLUTION_NONE )
     {
         assert( rgb_buffer);
         

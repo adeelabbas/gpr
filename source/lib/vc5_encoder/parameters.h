@@ -117,10 +117,9 @@ typedef struct _encoder_parameters
     
     //! Allocator
     gpr_allocator       allocator;
-    
-    GPR_RGB_RESOLUTION  rgb_resolution;
 
-    gpr_rgb_gain        rgb_gain;
+    //! RGB Conversion Params
+    RGB_PARAMETERS      rgb_params;         //!< Resolution and rendering parameters of the RGB preview/thumbnail generated during encoding
 
 } ENCODER_PARAMETERS;
 

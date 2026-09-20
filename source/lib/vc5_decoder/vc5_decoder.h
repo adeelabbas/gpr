@@ -23,6 +23,7 @@
 #include "types.h"
 #include "gpr_buffer.h"
 #include "gpr_rgb_buffer.h"
+#include "rgb.h"
 #include "vc5_common.h"
 
 #ifdef __cplusplus
@@ -50,8 +51,6 @@
         
     } VC5_DECODER_PIXEL_FORMAT;
 
-    #define VC5_DECODER_RGB_RESOLUTION_DEFAULT GPR_RGB_RESOLUTION_QUARTER
-        
     /*!
      @brief vc5 decoder parameters
      */
@@ -61,12 +60,9 @@
         
         VC5_DECODER_PIXEL_FORMAT        pixel_format;           // Bayer Ordering Pattern (Default: VC5_ENCODER_BAYER_ORDERING_RGGB)
         
-        GPR_RGB_RESOLUTION              rgb_resolution;
+        RGB_PARAMETERS                  rgb_params;             // Resolution and rendering parameters (output bits, white balance,
+                                                                // black level, color matrix, baseline exposure) of the RGB output path
 
-        int                             rgb_bits;
-        
-        gpr_rgb_gain                    rgb_gain;
-        
         gpr_malloc                      mem_alloc;              // Callback function to allocate memory
 
         gpr_free                        mem_free;               // Callback function to free memory
