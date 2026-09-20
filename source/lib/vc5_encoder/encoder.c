@@ -33,7 +33,7 @@
 
 #include "headers.h"
 
-#if ENABLED(NEON)
+#if ENABLED(GPR_NEON)
 #include <arm_neon.h>
 #endif
 

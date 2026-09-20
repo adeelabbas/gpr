@@ -18,7 +18,7 @@
 
 #include "headers.h"
 
-#if ENABLED(NEON)
+#if ENABLED(GPR_NEON)
 #include <arm_neon.h>
 #endif
 
@@ -72,7 +72,7 @@ static void UnpackPixel_14(uint16_t *input_row1_ptr, uint16_t *input_row2_ptr, i
     BG_output_row_ptr[column] = clamp_uint(BG, internal_precision);
 }
 
-#if ENABLED(NEON)
+#if ENABLED(GPR_NEON)
 
 #define UnpackPixel_14_8x UnpackPixel_14_8x_NEON_
 static void UnpackPixel_14_8x_NEON_(uint16_t *input_row1_ptr, uint16_t *input_row2_ptr, int column, PIXEL *output_buffer[], bool rggb )
@@ -256,7 +256,7 @@ static void UnpackPixel_12(uint16_t *input_row1_ptr, uint16_t *input_row2_ptr, i
     BG_output_row_ptr[column] = clamp_uint(BG, internal_precision);
 }
 
-#if ENABLED(NEON)
+#if ENABLED(GPR_NEON)
 
 #define UnpackPixel_12_8x UnpackPixel_12_8x_NEON_
 static void UnpackPixel_12_8x_NEON_(uint16_t *input_row1_ptr, uint16_t *input_row2_ptr, int column, PIXEL *output_buffer[], bool rggb )
@@ -466,7 +466,7 @@ static void UnpackPixel_12P(uint16_t *input_row1_ptr, uint16_t *input_row2_ptr, 
     }
 }
 
-#if ENABLED(NEON)
+#if ENABLED(GPR_NEON)
 
 #define UnpackPixel_12P_8x UnpackPixel_12P_8x_NEON_
 static void UnpackPixel_12P_8x_NEON_(uint16_t *input_row1_ptr, uint16_t *input_row2_ptr, int column, PIXEL *output_buffer[], bool rggb )

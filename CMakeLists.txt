@@ -34,6 +34,24 @@ add_definitions("-DGIT_COMMIT_HASH=\"${GIT_COMMIT_HASH}\"")
 add_definitions("-DGIT_BRANCH=\"${GIT_BRANCH}\"")
 
 # ---------------------------------------------------------------------------
+# NEON SIMD support
+#
+# The VC5 codec has hand-written NEON kernels (currently in the encoder), gated
+# on the GPR_NEON preprocessor symbol which defaults to 0 in gpr_platform.h. Detect
+# ARM here and define GPR_NEON=1 for the whole project so every subdirectory added
+# below (the encoder today, the decoder if kernels are added later) inherits the
+# flag. Force the scalar path with -DGPR_NEON=OFF.
+# ---------------------------------------------------------------------------
+option( GPR_NEON "Enable NEON SIMD kernels on ARM" ON )
+
+if( GPR_NEON AND ( CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64" OR CMAKE_OSX_ARCHITECTURES MATCHES "arm64" ) )
+  add_definitions( "-DGPR_NEON=1" )
+  message( STATUS "NEON SIMD: available (arm64) - enabling (GPR_NEON=1)" )
+else()
+  message( STATUS "NEON SIMD: not enabled - using scalar path (set GPR_NEON=ON on an arm64 target to enable)" )
+endif()
+
+# ---------------------------------------------------------------------------
 # Optional codec features
 #
 # Each feature is available only when its source directory is present, and can
