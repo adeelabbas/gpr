@@ -89,6 +89,14 @@ static int gpr_jpeg_get_dimensions( const unsigned char* d, size_t n, int* width
 
 #include "tiny_jpeg.h"
 
+// Convert a DNG/Adobe orientation (0-7) to its EXIF/TIFF Orientation value (1-8).
+static int gpr_adobe_orientation_to_exif( int adobe_orientation )
+{
+    // Indexed by the Adobe orientation enum (kNormal=0 .. kMirror90CCW=7).
+    static const int exif[8] = { 1, 6, 3, 8, 2, 7, 4, 5 };
+    return ( adobe_orientation >= 0 && adobe_orientation < 8 ) ? exif[adobe_orientation] : 1;
+}
+
 // Growable byte buffer used to collect the JPEG produced by tje_encode_with_func.
 // tiny_jpeg gives its sink no way to report failure or negotiate space, and JPEG output has no
 // useful upper bound (high-entropy content measures ~3 bytes/pixel at quality 2 where typical
@@ -131,6 +139,74 @@ static void gpr_jpg_sink_write( void* context, void* data, int size )
 
     memcpy( sink->data + sink->size, data, (size_t)size );
     sink->size += (size_t)size;
+}
+
+// Encode interleaved 8-bit RGB into an in-memory JPEG with an embedded EXIF Orientation tag.
+// exif_orientation is a TIFF/EXIF Orientation value (1-8). out_jpg is allocated with
+// allocator->Alloc (free it with the matching allocator->Free). Returns true on success.
+static bool gpr_encode_rgb_to_jpg( const gpr_allocator* allocator,
+                                   const unsigned char* rgb, int width, int height,
+                                   int quality, int exif_orientation,
+                                   gpr_buffer* out_jpg )
+{
+    // Minimal EXIF APP1 segment (little-endian TIFF) with two IFD0 tags in ascending order:
+    // Orientation (0x0112) and YCbCrPositioning (0x0213, required for a conformant JPEG EXIF).
+    unsigned char app1[] =
+    {
+        0xFF, 0xE1, 0x00, 0x2E,                          // APP1 marker, segment length = 46
+        'E',  'x',  'i',  'f',  0x00, 0x00,              // "Exif\0\0"
+        'I',  'I',  0x2A, 0x00, 0x08, 0x00, 0x00, 0x00,  // TIFF header (LE), IFD0 at offset 8
+        0x02, 0x00,                                      // IFD0: 2 entries
+        0x12, 0x01, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00,  // tag 0x0112 Orientation, SHORT, count 1
+        0x00, 0x00, 0x00, 0x00,                          // Orientation value (set below) + padding
+        0x13, 0x02, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00,  // tag 0x0213 YCbCrPositioning, SHORT, count 1
+        0x01, 0x00, 0x00, 0x00,                          // YCbCrPositioning value = 1 (centered) + padding
+        0x00, 0x00, 0x00, 0x00                           // next IFD offset = 0
+    };
+
+    gpr_jpg_sink sink = { NULL, 0, 0, false };
+    unsigned char* out;
+
+    // tinyjpeg only supports quality levels 1 (lowest), 2, or 3 (highest).
+    if( quality < 1 ) quality = 1;
+    if( quality > 3 ) quality = 3;
+
+    app1[28] = (unsigned char)( exif_orientation & 0xFF ); // Orientation SHORT (low byte)
+    app1[29] = 0x00;
+
+    if( tje_encode_with_func( gpr_jpg_sink_write, &sink, quality, width, height, 3, rgb ) == 0 ||
+        sink.failed || sink.data == NULL )
+    {
+        free( sink.data );
+        return false;
+    }
+
+    // Insert the EXIF segment right after the SOI marker (FFD8) so it is the first segment.
+    if( sink.size >= 2 && sink.data[0] == 0xFF && sink.data[1] == 0xD8 )
+    {
+        out_jpg->size   = sink.size + sizeof(app1);
+        out_jpg->buffer = allocator->Alloc( out_jpg->size );
+
+        if( out_jpg->buffer == NULL ) { free( sink.data ); return false; }
+
+        out = (unsigned char*)out_jpg->buffer;
+        memcpy( out,                     sink.data,     2 );               // SOI
+        memcpy( out + 2,                 app1,          sizeof(app1) );    // EXIF APP1
+        memcpy( out + 2 + sizeof(app1),  sink.data + 2, sink.size - 2 );   // rest of the JPEG
+    }
+    else
+    {
+        out_jpg->size   = sink.size;
+        out_jpg->buffer = allocator->Alloc( out_jpg->size );
+
+        if( out_jpg->buffer == NULL ) { free( sink.data ); return false; }
+
+        memcpy( out_jpg->buffer, sink.data, sink.size );
+    }
+
+    free( sink.data );
+
+    return true;
 }
 
 #endif // GPR_JPEG_AVAILABLE
