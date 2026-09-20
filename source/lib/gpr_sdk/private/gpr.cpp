@@ -469,6 +469,8 @@ void gpr_parameters_set_defaults(gpr_parameters* x)
 
     x->preview_resolution = GPR_RGB_RESOLUTION_DEFAULT;
 
+    x->reencode = false;
+
     x->compute_md5sum = false;
 }
 
@@ -2363,7 +2365,7 @@ bool gpr_convert_dng_to_vc5(const gpr_allocator*    allocator,
 // avoiding the vc5 decode/re-encode entirely. The auto-generated thumbnail is a by-product
 // of running the vc5 encoder, so when the caller requests a preview without supplying the
 // JPEG bytes (enable_preview set, preview_image empty) the input is decoded and re-encoded
-// from scratch instead.
+// from scratch instead, as it is when the caller asks for that outright (reencode).
 bool gpr_convert_gpr_to_gpr(const gpr_allocator*    allocator,
                             const gpr_parameters*   parameters,
                                   gpr_buffer*       inp_gpr_buffer,
@@ -2380,7 +2382,9 @@ bool gpr_convert_gpr_to_gpr(const gpr_allocator*    allocator,
           parameters->preview_image.jpg_preview.size == 0 );
 #endif
 
-    if( needs_encoded_thumbnail == false )
+    const bool needs_encode = needs_encoded_thumbnail || parameters->reencode;
+
+    if( needs_encode == false )
     {
         gpr_buffer vc5_buffer = { NULL, 0 };
 

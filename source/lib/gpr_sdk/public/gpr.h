@@ -65,6 +65,13 @@
 
             GPR_RGB_RESOLUTION  preview_resolution; /* Resolution of the generated RGB preview (2:1, 4:1, 8:1, 16:1) */
 
+            bool                reencode;       /* gpr_convert_gpr_to_gpr only: decode the input and encode it
+                                                   again (at quality, with the preview settings) instead of
+                                                   repackaging its vc5 bitstream. false from
+                                                   gpr_parameters_set_defaults: a GPR input is repackaged, and
+                                                   re-encoded only when a generated preview needs the encoder.
+                                                   The other conversions always encode and ignore it. */
+
             gpr_exif_info       exif_info;      /* Exif info object */
             
             gpr_profile_info    profile_info;   /* Camera color profile info object */
@@ -153,10 +160,10 @@
 
 #if GPR_WRITING && GPR_READING
         //!< gpr to gpr conversion: repackages the input's vc5 bitstream with the caller's
-        //!< metadata, without decoding or re-encoding the image. Falls back to a full decode +
-        //!< re-encode only when an auto-generated preview/thumbnail is requested (enable_preview
-        //!< set without supplying preview_image JPEG bytes), since that thumbnail is produced as
-        //!< a by-product of vc5 encoding.
+        //!< metadata, without decoding or re-encoding the image. Decodes and re-encodes instead
+        //!< when the caller asks for it (reencode) or when an auto-generated preview/thumbnail
+        //!< is requested (enable_preview set without supplying preview_image JPEG bytes), since
+        //!< that thumbnail is produced as a by-product of vc5 encoding.
         bool gpr_convert_gpr_to_gpr(const gpr_allocator*    allocator,
                                     const gpr_parameters*   parameters,
                                           gpr_buffer*       inp_gpr_buffer,
