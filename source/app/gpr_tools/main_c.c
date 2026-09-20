@@ -130,6 +130,16 @@ static unsigned int pixel_format_get_bits(GPR_PIXEL_FORMAT p)
     }
 }
 
+// Maps a downscale ratio string to its enum. Returns 1 on match, 0 otherwise.
+static int parse_ratio( const char* ratio, GPR_RGB_RESOLUTION* out )
+{
+    if( strcmp(ratio, "2:1")  == 0 ) { *out = GPR_RGB_RESOLUTION_HALF;      return 1; }
+    if( strcmp(ratio, "4:1")  == 0 ) { *out = GPR_RGB_RESOLUTION_QUARTER;   return 1; }
+    if( strcmp(ratio, "8:1")  == 0 ) { *out = GPR_RGB_RESOLUTION_EIGHTH;    return 1; }
+    if( strcmp(ratio, "16:1") == 0 ) { *out = GPR_RGB_RESOLUTION_SIXTEENTH; return 1; }
+    return 0;
+}
+
 int dng_convert_main( const dng_convert_params* convert_params )
 {
     if( convert_params == NULL )
@@ -149,7 +159,7 @@ int dng_convert_main( const dng_convert_params* convert_params )
     const char*  gpmf_file_path         = convert_params->gpmf_file_path;
     const char*  rgb_file_resolution    = convert_params->rgb_file_resolution;
     int          rgb_file_bits          = convert_params->rgb_file_bits;
-    const char*  jpg_preview_file_path  = convert_params->jpg_preview_file_path;
+    const char*  preview                = convert_params->preview;
 
     bool success;
     bool write_buffer_to_file = true;
@@ -258,15 +268,38 @@ int dng_convert_main( const dng_convert_params* convert_params )
     {
         input_buffer.buffer = (unsigned char*)(input_buffer.buffer) + (input_skip_rows * input_pitch);
     }
-    
-    gpr_buffer preview = { NULL, 0 };
 
-    if( strcmp(jpg_preview_file_path, "") != 0 )
+    gpr_buffer preview_jpg = { NULL, 0 };
+
+    // --preview consolidates every preview control: omitted means no embedded preview at all,
+    // a jpg file on disk is embedded as-is, and a downscale ratio requests an auto-generated
+    // preview at that resolution. Anything else fails the conversion. enable_preview gates
+    // both the caller-supplied JPEG and the auto-generated thumbnail inside the SDK.
+    if( preview == NULL || strcmp(preview, "") == 0 )
     {
-        if( read_from_file( &preview, jpg_preview_file_path, allocator.Alloc, allocator.Free) == 0 )
+        params.enable_preview = false;
+    }
+    else if( GetFileType( preview ) == FILE_TYPE_JPG )
+    {
+        if( read_from_file( &preview_jpg, preview, allocator.Alloc, allocator.Free ) != 0 )
         {
-            params.preview_image.jpg_preview    = preview;
+            fprintf( stderr, "Could not read preview file %s\n", preview );
+            return -1;
         }
+
+        // The SDK reads the preview dimensions from the JPEG header itself when embedding it,
+        // so the app only needs to hand over the compressed JPEG bytes.
+        params.enable_preview = true;
+        params.preview_image.jpg_preview = preview_jpg;
+    }
+    else if( parse_ratio( preview, &params.preview_resolution ) )
+    {
+        params.enable_preview = true;
+    }
+    else
+    {
+        fprintf( stderr, "Invalid preview `%s'; expected a jpg file or one of: 2:1, 4:1, 8:1, 16:1\n", preview );
+        return -1;
     }
     
     if( input_file_type == FILE_TYPE_RAW && output_file_type == FILE_TYPE_DNG )
@@ -383,9 +416,9 @@ int dng_convert_main( const dng_convert_params* convert_params )
 		input_buffer.buffer = (unsigned char*)(input_buffer.buffer) - (input_skip_rows * input_pitch);
     }
     
-    if( preview.buffer )
+    if( preview_jpg.buffer )
     {
-        allocator.Free( preview.buffer );
+        allocator.Free( preview_jpg.buffer );
     }
     
     gpr_parameters_destroy(&params, allocator.Free);

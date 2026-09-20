@@ -40,7 +40,13 @@ extern "C" {
         const char*     gpmf_file_path;
         const char*     rgb_file_resolution;
         int             rgb_file_bits;
-        const char*     jpg_preview_file_path;
+
+        const char*     preview;                 /* Embedded preview image. NULL or empty: no preview is
+                                                    written. The path of a jpg file on disk: that file is
+                                                    embedded as the preview. 2:1, 4:1, 8:1 or 16:1: a
+                                                    preview is auto-generated at that resolution.
+                                                    Any other value fails the conversion. */
+
     } dng_convert_params;
 
     int dng_convert_main( const dng_convert_params* convert_params );

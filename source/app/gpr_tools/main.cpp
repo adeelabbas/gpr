@@ -36,7 +36,8 @@ class my_argument_parser : public argument_parser
     bool    verbose;
 
 public:
-    string  jpg_preview_file_path;
+
+    string  preview;
 
     bool    print_metadata;
     string  apply_metadata;
@@ -70,7 +71,9 @@ public:
         
         ("verbose,v",               verbose,              false,            "Verbosity of the output")
 
-        ("preview_file_path",       jpg_preview_file_path, string(""),      "Preview jpg file path")
+        ("preview",                 preview,              string(""),       "Embedded preview image, only applicable when writing GPR \n"
+                                                                            "Either the path of a jpg file to embed, or the resolution of an auto-generated preview \n"
+                                                                            "Resolution choices: 2:1, 4:1, 8:1, 16:1. When not set, no preview is written")
         
         ("print_metadata,d",        print_metadata,       false,            "Print gpr params (as json) to standard output")
         ("apply_metadata,a",        apply_metadata,       string(""),       "Use gpr params for GPR/DNG metadata")
@@ -190,7 +193,7 @@ int main(int argc, char *argv [])
         convert_params.gpmf_file_path          = args.gpmf_path.c_str();
         convert_params.rgb_file_resolution     = args.rgb_resolution.c_str();
         convert_params.rgb_file_bits           = args.output_ppm_bits;
-        convert_params.jpg_preview_file_path   = args.jpg_preview_file_path.c_str();
+        convert_params.preview                 = args.preview.c_str();
 
         return dng_convert_main( &convert_params );
     }
