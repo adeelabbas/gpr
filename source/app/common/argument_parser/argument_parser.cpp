@@ -55,6 +55,7 @@ using namespace std;
 
 argument_parser::argument_parser(bool verbose)
 {
+    application_path = NULL;
 }
 
 void argument_parser::set_options()
@@ -76,6 +77,8 @@ int argument_parser::parse(int argc, char *argv [], const char* application_text
 
     for (int i = 0; i < argument_count; i++)
         arguments[i] = argv[i];
+
+    application_path = ( argc > 0 ) ? argv[0] : "";
 
     set_options();
     
