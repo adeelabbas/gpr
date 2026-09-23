@@ -1300,7 +1300,12 @@ static bool read_dng(const gpr_allocator*       allocator,
                             tuning_info.pixel_format = PIXEL_FORMAT_GBRG_12;
                         else
                         {
-                            assert(0);
+                            // No pixel format describes GBRG above 12 bits. A file that reaches
+                            // here is unsupported input (earlier gpr_tools wrote GBRG GPRs from
+                            // RAW at 16383), so report it instead of asserting.
+                            fprintf( stderr, "Error: unsupported DNG -- a mosaic other than RGGB or BGGR is read as GBRG, "
+                                              "which is supported at 12 bits (WhiteLevel 4095) only, but found WhiteLevel %u.\n",
+                                              (unsigned)dgain_saturation_level.level_red );
                             return false;
                         }
                     }
