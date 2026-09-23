@@ -2429,7 +2429,6 @@ bool gpr_convert_dng_to_vc5(const gpr_allocator*    allocator,
         // input DNG is already vc5-compressed (i.e. a GPR).
         if( read_dng( allocator, &inp_dng_stream, &raw_buffer, &vc5_buffer, &params, &is_vc5_format ) == false )
         {
-            assert(0);
             gpr_parameters_destroy( &params, allocator->Free );
             return false;
         }
