@@ -1828,7 +1828,7 @@ static void run_left_justified_cli_tests()
     });
 
     run_case( "--input_left_justified: the bits below each sample are ignored", []{
-        const char* formats[] = { "rggb12", "bggr12" };
+        const char* formats[] = { "rggb12", "gbrg12", "bggr12" };
         for( size_t f = 0; f < sizeof(formats) / sizeof(formats[0]); ++f )
         {
             check_left_justified_matches( formats[f], 12, g_cli_W, g_cli_H, "lj_junk.GPR", true,  /*junk=*/true, "" );
