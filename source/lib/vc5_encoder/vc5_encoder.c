@@ -47,8 +47,25 @@ CODEC_ERROR vc5_encoder_process(const vc5_encoder_parameters*   encoding_paramet
     
     STREAM bitstream_file;
     
-    // It is assumed that vc5 will always encode at 2:1 compression ratio, compared to raw buffer
-    const int max_vc5_buffer_size = raw_buffer->size / 2;
+    // Size the output for the worst case rather than for a compression ratio: 12-bit noise
+    // encodes to 8.4 bits per pixel at Filmscan-X and 11.1 at Ultra, past the 8 (16-bit input)
+    // or 6 (packed input) that half of the input buffer allowed. Each of the four channels is a
+    // quarter of the frame, and its three wavelet levels code one coefficient per pixel plus the
+    // padding that rounds each level up to an even size, at most 7 rows and 7 columns in all.
+    // No coefficient takes more than MAX_CODED_COEFFICIENT_BITS. Everything else is at most
+    // 1976 bytes, within the 4 KB allowed for it: 72 of image header and identifier, and per
+    // channel 102 tag segments, nine 26-bit band end codewords and ten paddings of up to 31
+    // bits, 476 bytes (1598 to 1624 bytes measured). The bit count passes 32 bits at about 159
+    // megapixels, so the size is computed in 64 bits and refused if it does not fit a size_t.
+    const uint64_t max_channel_coefficients = ((uint64_t)encoding_parameters->input_width / 2 + 7) *
+                                              ((uint64_t)encoding_parameters->input_height / 2 + 7);
+    const uint64_t max_vc5_buffer_bytes = (4 * max_channel_coefficients * MAX_CODED_COEFFICIENT_BITS) / 8 + 4096;
+
+    if (max_vc5_buffer_bytes > SIZE_MAX) {
+        return CODEC_ERROR_OUTOFMEMORY;
+    }
+
+    const size_t max_vc5_buffer_size = (size_t)max_vc5_buffer_bytes;
 
     // Initialize the data structure for passing parameters to the encoder
     InitEncoderParameters(&parameters);
@@ -178,6 +195,12 @@ CODEC_ERROR vc5_encoder_process(const vc5_encoder_parameters*   encoding_paramet
         return error;
     }
     
+    // The stream stops storing at the end of the buffer but keeps counting, so a count past
+    // the end means the bitstream was cut short
+    if (bitstream_file.byte_count > max_vc5_buffer_size) {
+        return CODEC_ERROR_FILE_WRITE;
+    }
+
     if( rgb_buffer )
     {
         rgb_buffer->buffer  = rgb_image.buffer;

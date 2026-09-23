@@ -25,6 +25,15 @@
 #ifndef CODEBOOKS_H
 #define CODEBOOKS_H
 
+/*!
+ @brief Largest number of bits that one coefficient takes in the bitstream
+
+ The longest codeword for a coefficient magnitude in codebook 17 is 26 bits (m116)
+ and it is followed by the sign bit. A run of zeros never takes more bits than the
+ number of zeros in the run (one bit for a single zero, 13 bits for a run of 320),
+ and a lowpass coefficient takes lowpass_precision (16) bits.
+ */
+#define MAX_CODED_COEFFICIENT_BITS  27
 
 #ifdef __cplusplus
 extern "C" {
