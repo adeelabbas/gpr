@@ -14,7 +14,7 @@ The wavelet codec in GPR is not new, but has been a SMPTE® standard under the n
 
 This repository is a fork of [gopro/gpr](https://github.com/gopro/gpr) that extends the GPR/VC-5 **encoder** and the **DNG writer**, so that raw images from more cameras and phones can be written as GPR files that open correctly in Apple, Adobe and other DNG readers. The decoder is functionally unchanged apart from the additions the encoder round-trips need. What is new:
 
-* **More sensor layouts.** BGGR Bayer mosaics at 12 and 14 bits (`bggr12`, `bggr14`) can be encoded alongside RGGB and GBRG, so a DNG from an Apple iPhone or another BGGR sensor converts to GPR. The raw's `ActiveArea` / `DefaultCrop` tags are honored (the visible crop is what gets encoded), a large sensor black level (iPhone: 528) is subtracted and the range stretched before the VC-5 log curve so the codec's precision lands on the signal, a `NoiseProfile` stored in the raw SubIFD is read, and already-demosaiced DNGs (Apple ProRAW) are rejected with a clear error instead of an assert.
+* **More sensor layouts.** BGGR Bayer mosaics at 12 and 14 bits (`bggr12`, `bggr14`) can be encoded alongside RGGB and GBRG, so a DNG from an Apple iPhone or another BGGR sensor converts to GPR. The raw's `ActiveArea` / `DefaultCrop` tags are honored (the visible crop is what gets encoded), a large sensor black level (iPhone: 528) is subtracted and the range stretched before the VC-5 log curve so the codec's precision lands on the signal, a `NoiseProfile` stored in the raw SubIFD is read, and already-demosaiced DNGs (Apple ProRAW) are rejected with a clear error instead of an assert. RAW input whose samples sit in the top bits of each 16-bit word (a Verkada camera's 12-bit frames, for example) is encoded as-is with `gpr_parameters::input_left_justified` (`gpr_tools --input_left_justified`): the encoder's unpacking, the black-level subtraction or the copy into a DNG takes each sample from the top bits as it reads it, so no pass is added, and the output is byte-identical to that of the same frame right-justified.
 * **Faithful metadata.** `CalibrationIlluminant1/2`, `BaselineExposure`, `BaselineNoise`, `BaselineSharpness` and per-channel `BlackLevel` repeat patterns are carried through, and `OpcodeList3 WarpRectilinear` round-trips at full fidelity (planes, center, flags, all radial and tangential terms).
 * **Apple ImageIO compatibility.** Apple's RAW pipeline drops a DNG's entire `OpcodeList2` gain map unless the two green CFA planes carry byte-identical gains; the writer now equalizes them, identifying the greens by each opcode's own CFA cell rather than by list position.
 * **Lens-distortion correction on DNG output.** Built-in geometric profiles for HERO5 through HERO13 and MISSION 1 PRO write a synthesized `WarpRectilinear` (`gpr_tools --lens_correction=auto|k0,k1,k2,k3[,cx,cy]`, `--lens_correction_strength`), also exposed as `gpr_parameters_apply_lens_profile` in the SDK.
@@ -180,6 +180,12 @@ Convert a BGGR DNG (for example from an iPhone) to GPR. Shifting the mosaic by o
 
 ```
 $ gpr_tools -i IPHONE.DNG -o OUTPUT.GPR --input_skip_cols=1 --input_pixel_format=gbrg12
+```
+
+Encode a headerless RAW frame whose samples are left-justified in their 16-bit words (12-bit data in the top 12 bits, as some cameras write it). Each sample is taken from the top bits as the frame is encoded, and the bits below it are ignored; SDK callers set `gpr_parameters::input_left_justified`:
+
+```
+$ gpr_tools -i INPUT.RAW -o OUTPUT.GPR -w 3840 -h 2160 -p 7680 -x rggb12 --input_left_justified
 ```
 
 Write a DNG with a geometric lens-distortion correction (a synthesized OpcodeList3 WarpRectilinear that DNG readers apply when rendering), using the built-in profile for the source camera or explicit coefficients:
