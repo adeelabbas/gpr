@@ -416,6 +416,9 @@ CODEC_ERROR FillMagnitudeEncodingTable(const CODEBOOK *codebook, VLE *mags_table
 		}
 		assert(0 < codesize && codesize <= 32);
 
+		// The encoder sizes its output from this bound (see vc5_encoder_process)
+		assert(codesize + 1 <= MAX_CODED_COEFFICIENT_BITS);
+
 		mags_table_entry[mags_table_index].bits = codeword;
 		mags_table_entry[mags_table_index].size = codesize;
 

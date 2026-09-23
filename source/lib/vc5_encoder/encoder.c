@@ -203,6 +203,9 @@ CODEC_ERROR PrepareEncoderState(ENCODER *encoder,
 		lowpass_precision = parameters->encoded.lowpass_precision;
 	}
 
+	// The output buffer is sized for no coefficient taking more bits (see vc5_encoder_process)
+	assert(lowpass_precision <= MAX_CODED_COEFFICIENT_BITS);
+
 	for (channel_number = 0; channel_number < channel_count; channel_number++)
 	{
 		DIMENSION width = image->component_array_list[channel_number].width;
@@ -2417,6 +2420,17 @@ CODEC_ERROR EncodeHighpassBandRowRuns(BITSTREAM *stream, ENCODER_CODESET *codese
     
     int mags_table_length_minus_1 = mags_table->length - 1;
     
+    // The rows are written straight into the memory buffer, bypassing the bounds check in
+    // PutWord, so refuse the band unless the words it can write in the worst case fit
+    {
+        size_t max_band_bits = (size_t)pitch * height * MAX_CODED_COEFFICIENT_BITS + stream->count;
+        size_t max_band_size = (max_band_bits / bit_word_count) * sizeof(BITWORD);
+
+        if (bit_stream->byte_count + max_band_size > bit_stream->location.memory.size) {
+            return CODEC_ERROR_FILE_WRITE;
+        }
+    }
+
     uint8_t* stream_buffer      = (uint8_t *)bit_stream->location.memory.buffer + bit_stream->byte_count;
     uint8_t* stream_buffer_orig = stream_buffer;
     

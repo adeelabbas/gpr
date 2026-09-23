@@ -228,8 +228,9 @@ static unsigned int tiff_u32( const unsigned char* p, bool le )
 
 // Returns true if any IFD (including SubIFDs) sets Compression (259) to ccVc5 (9).
 // An independent ground truth (reads the TIFF tag directly) that the test cross-checks
-// against the public gpr_check_vc5() at every call site.
-static bool tiff_has_vc5_compression( const gpr_buffer& buf )
+// against the public gpr_check_vc5() at every call site. vc5_size receives that IFD's
+// single TileByteCounts (325) entry, the size of the VC-5 bitstream the writer stored.
+static bool tiff_has_vc5_compression( const gpr_buffer& buf, size_t* vc5_size = NULL )
 {
     if( !buf.buffer || buf.size < 8 ) return false;
     const unsigned char* d = (const unsigned char*)buf.buffer;
@@ -248,6 +249,9 @@ static bool tiff_has_vc5_compression( const gpr_buffer& buf )
         size_t entry = (size_t)off + 2;
         if( entry + (size_t)count * 12 > n ) continue;
 
+        bool   is_vc5    = false;
+        size_t tile_size = 0;
+
         for( unsigned int e = 0; e < count; ++e, entry += 12 )
         {
             unsigned int tag  = tiff_u16( d + entry, le );
@@ -256,7 +260,12 @@ static bool tiff_has_vc5_compression( const gpr_buffer& buf )
 
             if( tag == 259 /* Compression */ && type == 3 /* SHORT */ )
             {
-                if( tiff_u16( d + entry + 8, le ) == 9 /* ccVc5 */ ) return true;
+                if( tiff_u16( d + entry + 8, le ) == 9 /* ccVc5 */ ) is_vc5 = true;
+            }
+            else if( tag == 325 /* TileByteCounts */ && cnt == 1 )
+            {
+                tile_size = ( type == 3 /* SHORT */ ) ? tiff_u16( d + entry + 8, le )
+                                                      : tiff_u32( d + entry + 8, le );
             }
             else if( tag == 330 /* SubIFDs */ )
             {
@@ -269,6 +278,12 @@ static bool tiff_has_vc5_compression( const gpr_buffer& buf )
                         ifd_offsets.push_back( tiff_u32( d + p, le ) );
                 }
             }
+        }
+
+        if( is_vc5 )
+        {
+            if( vc5_size ) *vc5_size = tile_size;
+            return true;
         }
     }
     return false;
@@ -1937,6 +1952,86 @@ static void run_quality_cli_tests()
                        "fsx output byte-identical to the default output" );
         }
         std::remove( dng.c_str() );
+    });
+
+    // 12-bit noise does not compress: it takes 8.3 bits per pixel at fsx and 11 at ultra, past
+    // the 8 (16-bit input) and 6 (packed input) that the encoder's output buffer allowed when it
+    // was half the input, and the highpass writer ran off its end. The TIFF tile size proves the
+    // bitstream passed 8 bits per pixel, and the tile size and the decode are what would catch a
+    // bitstream cut short. Both containers now get the same buffer, sized from the frame, so the
+    // byte-for-byte match with the packed twin shows that the 12P path unpacks the same samples;
+    // it cannot see a truncation.
+    run_case( "--quality=<level> on a noise RAW: rggb12 and gbrg12 encode like their packed twins, and decode", []{
+        const unsigned int w = 512, h = 384;
+        const size_t eight_bpp    = (size_t)w * h;            // half the rggb12 input
+        const size_t packed_pitch = ( w * 3 / 4 ) * 2;         // the pitch dng_convert_main assumes
+
+        std::vector<unsigned short> samples( (size_t)w * h );
+        for( size_t i = 0; i < samples.size(); ++i )
+            samples[i] = (unsigned short)( ( i * 131 + 7 ) & 0xFFF );
+
+        // Two samples a, b in three bytes: a's low byte, b's low nibble above a's high nibble,
+        // then b's high byte (the layout the encoder's 12P unpacker reads)
+        std::vector<unsigned char> packed( packed_pitch * h );
+        for( unsigned int y = 0; y < h; ++y )
+            for( unsigned int x = 0; x < w; x += 2 )
+            {
+                const unsigned int a = samples[ (size_t)y * w + x ], b = samples[ (size_t)y * w + x + 1 ];
+                unsigned char* p = &packed[ y * packed_pitch + ( x / 2 ) * 3 ];
+                p[0] = (unsigned char)( a & 0xFF );
+                p[1] = (unsigned char)( ( a >> 8 ) | ( ( b & 0xF ) << 4 ) );
+                p[2] = (unsigned char)( b >> 4 );
+            }
+
+        const std::string raw  = scratch_path( "noise.RAW" );
+        const std::string rawp = scratch_path( "noise_packed.RAW" );
+        check( save_file( raw.c_str(), samples.data(), samples.size() * sizeof(samples[0]) ) &&
+               save_file( rawp.c_str(), packed.data(), packed.size() ), "noise RAW files written" );
+
+        const char* formats[][2] = { { "rggb12", "rggb12p" }, { "gbrg12", "gbrg12p" } };
+        const char* levels[] = { "low", "medium", "high", "fs1", "fsx", "fs2", "ultra" };
+        for( size_t f = 0; f < sizeof(formats) / sizeof(formats[0]); ++f )
+        for( size_t i = 0; i < sizeof(levels) / sizeof(levels[0]); ++i )
+        {
+            const std::string out  = scratch_path( "noise.GPR" );
+            const std::string outp = scratch_path( "noise_packed.GPR" );
+            dng_convert_params p  = preview_cli_params( raw.c_str(), out.c_str(), "" );
+            dng_convert_params pp = preview_cli_params( rawp.c_str(), outp.c_str(), "" );
+            p.input_width  = pp.input_width  = w;
+            p.input_height = pp.input_height = h;
+            p.input_pixel_format  = formats[f][0];
+            pp.input_pixel_format = formats[f][1];
+            p.quality = pp.quality = levels[i];
+            check( dng_convert_main( &p ) == 0, "unpacked encode succeeds" );
+            check( dng_convert_main( &pp ) == 0, "packed encode succeeds" );
+
+            Buffer o, op;
+            const bool loaded = load_file( out.c_str(), o ) && load_file( outp.c_str(), op );
+            std::remove( outp.c_str() );
+            check( loaded, "outputs written" );
+            if( !loaded ) { std::remove( out.c_str() ); continue; }
+
+            validate_dng_like( o, w, h, /*vc5=*/true );
+            check( o.b.size == op.b.size && std::memcmp( o.b.buffer, op.b.buffer, o.b.size ) == 0,
+                   "packed output byte-identical to the unpacked one" );
+
+            size_t vc5_size = 0;
+            tiff_has_vc5_compression( o.b, &vc5_size );
+            if( std::strcmp( levels[i], "fsx" ) == 0 || std::strcmp( levels[i], "ultra" ) == 0 )
+                check( vc5_size > eight_bpp, "bitstream above 8 bits per pixel" );
+
+            const std::string dec = scratch_path( "noise_decoded.RAW" );
+            dng_convert_params pd = preview_cli_params( out.c_str(), dec.c_str(), "" );
+            check( dng_convert_main( &pd ) == 0, "GPR -> RAW decode succeeds" );
+            std::remove( out.c_str() );
+
+            Buffer r;
+            check( load_file( dec.c_str(), r ), "decoded RAW written" );
+            std::remove( dec.c_str() );
+            validate_raw( r, w, h );
+        }
+        std::remove( raw.c_str() );
+        std::remove( rawp.c_str() );
     });
 
     // A GPR input is repackaged without --quality; with it, the SDK decodes and re-encodes at
