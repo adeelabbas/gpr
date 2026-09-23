@@ -127,6 +127,23 @@ static unsigned int pixel_format_get_bits(GPR_PIXEL_FORMAT p)
     }
 }
 
+// Bit depth of the white level a GPR is written at when the input carries none (a RAW
+// without -a metadata). VC-5 codes 12- and 14-bit samples on one scale and the reader
+// decodes at the depth WhiteLevel names, so a 12-bit mosaic may be written as 14 bits,
+// which is what GoPro's RGGB GPRs carry. GBRG has no 14-bit pixel format: upstream decodes
+// a GBRG GPR at 12 bits and gpr_parameters_parse_dng accepts GBRG at 4095 only, so a GBRG
+// GPR written at 16383 could not be read back.
+static unsigned int pixel_format_get_gpr_bits(GPR_PIXEL_FORMAT p)
+{
+    switch( p ) {
+        case PIXEL_FORMAT_GBRG_12:
+        case PIXEL_FORMAT_GBRG_12P:
+            return 12;
+        default:
+            return 14;
+    }
+}
+
 // The --quality level names, in quantizer order (smallest files first); parsing and the
 // diagnostic both read this table.
 static const struct
@@ -321,7 +338,7 @@ int dng_convert_main( const dng_convert_params* convert_params )
         if( pixel_format_get_bits(params.tuning_info.pixel_format) == 14 )
             saturation_level = (1 << 14) - 1;
         else if( output_file_type == FILE_TYPE_GPR )
-            saturation_level = (1 << 14) - 1;
+            saturation_level = (1 << pixel_format_get_gpr_bits(params.tuning_info.pixel_format)) - 1;
         else if( output_file_type == FILE_TYPE_DNG )
             saturation_level = (1 << 12) - 1;
         else
