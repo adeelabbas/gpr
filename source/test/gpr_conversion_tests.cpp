@@ -1986,6 +1986,106 @@ static void run_quality_cli_tests()
 }
 
 // ---------------------------------------------------------------------------
+// gpr_tools on a headerless RAW input (dng_convert_main)
+//
+// Without --apply_metadata the white level comes from the pixel format, and a
+// 12-bit mosaic written as GPR must come back through the reader: parse,
+// decode at the depth WhiteLevel names, convert to DNG and to RAW. RGGB and
+// BGGR GPRs are written at 16383 and read back as 14 bits; GBRG exists at 12
+// bits only. The frame is synthetic_raw at the CLI sample's dimensions, where
+// its ramp wraps through the whole 12-bit range, so it runs after
+// run_preview_cli_tests.
+// ---------------------------------------------------------------------------
+
+struct RawInputFormat
+{
+    const char*      name;         // --input_pixel_format
+    GPR_PIXEL_FORMAT read_back;    // what gpr_parameters_parse_dng must report for the GPR
+    int              white;        // the GPR's WhiteLevel
+};
+static RawInputFormat g_raw_format;
+
+static void run_raw_input_cli_tests()
+{
+    std::fprintf( stdout, "\n== gpr_tools on a RAW input (dng_convert_main) ==\n" );
+
+    if( g_cli_sample.empty() )
+    {
+        run_case( "RAW input: CLI sample", []{ check( false, "run_preview_cli_tests must run first (no CLI sample loaded)" ); } );
+        return;
+    }
+
+    const RawInputFormat formats[] = {
+        { "rggb12", PIXEL_FORMAT_RGGB_14, 16383 },
+        { "bggr12", PIXEL_FORMAT_BGGR_14, 16383 },
+        { "gbrg12", PIXEL_FORMAT_GBRG_12,  4095 },   // was written at 16383, which nothing reads
+    };
+
+    for( size_t f = 0; f < sizeof(formats) / sizeof(formats[0]); ++f )
+    {
+        g_raw_format = formats[f];
+
+        run_case( std::string( "--input_pixel_format=" ) + g_raw_format.name +
+                  " on a RAW input: the GPR reads back at the white level it declares", []{
+            const std::string raw = scratch_path( "rawin.RAW" );
+            const std::string gpr = scratch_path( "rawin.GPR" );
+            check( save_raw( raw, synthetic_raw( g_cli_W, g_cli_H, 12, 0 ) ), "raw frame written" );
+
+            dng_convert_params p = raw_cli_params( raw.c_str(), gpr.c_str(), g_cli_W, g_cli_H, g_raw_format.name, false );
+            check( dng_convert_main( &p ) == 0, "raw -> gpr succeeds" );
+            std::remove( raw.c_str() );
+
+            Buffer o;
+            const bool loaded = load_file( gpr.c_str(), o );
+            check( loaded, "gpr written" );
+            if( !loaded ) return;
+
+            validate_dng_like( o, g_cli_W, g_cli_H, /*vc5=*/true );
+
+            gpr_parameters params;
+            gpr_parameters_set_defaults( &params );
+            gpr_buffer tmp = o.b;
+            if( gpr_parameters_parse_dng( &g_alloc, &tmp, &params ) )
+            {
+                check( params.tuning_info.pixel_format == g_raw_format.read_back, "read back as the written mosaic and depth" );
+                check( params.tuning_info.dgain_saturation_level.level_red == g_raw_format.white, "white level as written" );
+            }
+            gpr_parameters_destroy( &params, g_alloc.Free );
+
+            const std::string dng = scratch_path( "rawin.DNG" );
+            dng_convert_params pd = preview_cli_params( gpr.c_str(), dng.c_str(), "" );
+            check( dng_convert_main( &pd ) == 0, "gpr -> dng succeeds" );
+
+            Buffer d;
+            check( load_file( dng.c_str(), d ), "dng written" );
+            std::remove( dng.c_str() );
+            validate_dng_like( d, g_cli_W, g_cli_H, /*vc5=*/false );
+
+            const std::string back = scratch_path( "rawin_back.RAW" );
+            dng_convert_params pr = preview_cli_params( gpr.c_str(), back.c_str(), "" );
+            check( dng_convert_main( &pr ) == 0, "gpr -> raw succeeds" );
+            std::remove( gpr.c_str() );
+
+            Buffer r;
+            check( load_file( back.c_str(), r ), "raw written" );
+            std::remove( back.c_str() );
+            validate_raw( r, g_cli_W, g_cli_H );
+            if( r.b.size != (size_t)g_cli_W * g_cli_H * 2 ) return;
+
+            // The source spans the whole 12-bit range, so the decode fills the upper half of the
+            // declared range without passing it; decoded at another depth than WhiteLevel names,
+            // the maximum would land two bits above or below.
+            const unsigned short* s = (const unsigned short*)r.b.buffer;
+            int max = 0;
+            for( size_t i = 0; i < (size_t)g_cli_W * g_cli_H; ++i )
+                if( s[i] > max ) max = s[i];
+            check( max <= g_raw_format.white && max > g_raw_format.white / 2,
+                   "decoded samples fill the range the white level declares" );
+        });
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Command-line scanning (program_options_lite)
 //
 // Unknown options and options missing their value must be flagged as fatal via
@@ -2206,6 +2306,8 @@ int main( int argc, char* argv[] )
     run_left_justified_cli_tests();
 
     run_quality_cli_tests();
+
+    run_raw_input_cli_tests();
 
     run_argument_parser_tests();
 
