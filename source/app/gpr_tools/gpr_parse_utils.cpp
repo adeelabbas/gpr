@@ -583,6 +583,17 @@ int gpr_parameters_parse_json( gpr_parameters* parameters, const char* input_fil
     {
         return -2;
     }
+
+    // read_from_file does not NUL-terminate, and cJSON parses a C string: without the
+    // terminator its strlen reads past the file's bytes (ASan: heap-buffer-overflow).
+    char* text = (char*)realloc( buffer.buffer, buffer.size + 1 );
+    if( text == NULL )
+    {
+        free( buffer.buffer );
+        return -2;
+    }
+    text[buffer.size] = '\0';
+    buffer.buffer = text;
     
     const char* return_parse_end;
     
