@@ -25,6 +25,23 @@ This repository is a fork of [gopro/gpr](https://github.com/gopro/gpr) that exte
 * **Faster writing.** Output goes through a contiguous, growable stream handed to the caller without a final copy, `dng_to_dng` skips its redundant pixel copies (25-35% faster on large DNGs), and `tiny_jpeg` uses a batched bit-writer with 4:2:0 chroma at the two lower quality levels.
 * **Build and test.** The `GPR_READING`, `GPR_WRITING`, `GPR_JPEG_AVAILABLE`, `GPR_TIMING` and `GPR_NEON` switches are CMake options (NEON is enabled automatically on arm64), `scripts/test_build_flags.sh` and the GitHub Actions workflow build every configuration, and `source/test` holds a conversion test suite (`gpr_tools_tests`) that drives every `gpr_convert_*` entry point over the bundled samples.
 
+### How to encode gbrg12 format (shot on iPhone)
+
+An iPhone shoots raw DNGs as 12-bit BGGR mosaics (`bggr12`): blue and green alternate on even rows, green and red on odd rows. This fork can encode that layout as-is (`--input_pixel_format=bggr12`), but we do not encode iPhone captures that way, because GoPro cameras never wrote a BGGR GPR. Instead, the RAW Bayer image is phase-shifted by one column and encoded as GBRG:
+
+```
+$ gpr_tools -i IPHONE.DNG -o OUTPUT.GPR --input_skip_cols=1 --input_pixel_format=gbrg12
+```
+
+`--input_skip_cols=1` starts every row one pixel later, so `B G B G ...` / `G R G R ...` becomes `G B G B ...` / `R G R G ...`, which is a GBRG mosaic. `--input_pixel_format=gbrg12` tells the encoder and the DNG writer (the `CFAPattern` tag) about the new layout. Use the two together: either one on its own labels the mosaic with the wrong colors. Because the result is a GBRG mosaic, the layout GoPro cameras write, bggr12 captures open in existing versions of Lightroom with no software change.
+
+The same flags apply to a RAW dump of the DNG and its metadata, and `scripts/test_conversions.sh <folder>` runs both paths over every DNG in a folder:
+
+```
+$ gpr_tools -i IPHONE.DNG -o IPHONE.RAW -d > IPHONE.JSON
+$ gpr_tools -i IPHONE.RAW -o OUTPUT.GPR -a IPHONE.JSON --input_skip_cols=1 --input_pixel_format=gbrg12
+```
+
 ## File Types
 
 Following file types are discussed in this document:
@@ -198,22 +215,6 @@ $ gpr_tools -i INPUT.GPR -o OUTPUT.JPG --rgb_resolution=2:1 --output_jpg_quality
 ```
 
 Run `gpr_tools --help` for the complete option list. `scripts/test_conversions.sh <folder>` runs every conversion over a folder of GPR and DNG files, and `source/test/README.md` describes the test suite.
-
-## Using vc5_encoder_app
-
-vc5_encoder_app is an optional tool that can be used to convert RAW image data to VC5 essence, as shown below:
-
-```
-$ vc5_encoder_app -i INPUT.RAW -o OUTPUT.VC5 -w 4000 -h 3000 -p 8000
-```
-
-## Using vc5_decoder_app
-
-vc5_decoder_app is an optional tool that can be used to decode VC5 essence into RAW image data, as shown below:
-
-```
-$ vc5_decoder_app -i INPUT.VC5 -o OUTPUT.RAW
-```
 
 ## Source code organization
 
