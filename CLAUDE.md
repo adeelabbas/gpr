@@ -51,7 +51,11 @@ has to be carried across so the three do not drift. The rules:
   write new tests against the `gpr_tools` conversion layer (`dng_convert_main`)
   rather than against the `gpr_convert_*` signatures. Before opening the PR,
   cherry-pick the code commits onto a scratch branch of a local `gpraw/gpr`
-  clone, build, run its suite, and say so in the PR body.
+  clone, build, run its suite, and say so in the PR body. The tracked files
+  under `.claude/`, with `scripts/review_pr.sh` and `scripts/merge_pr.sh`,
+  are shared byte for byte with `gpraw/gpr`, and a change to them follows
+  this rule too: here first, then the same cherry-pick, never an edit made
+  there alone.
 - **Borrow from downstream.** Patterns that already exist in `gpraw/gpr` and
   apply to GPR file writing (encoder features, DNG metadata handling, writer
   robustness, test cases, review findings) belong here as well. Port them
@@ -93,11 +97,14 @@ plain language, grouped the way it is now, not a changelog of commits.
 | `source/lib/dng_sdk` | **Vendored and forked.** Adobe DNG SDK 1.4 with upstream's patches plus this fork's in `dng_shared.cpp`, `dng_xmp_sdk.cpp`, `dng_image_writer.cpp` and the added `dng_stage1_negative.*`. Edits are legitimate but must be surgical and justified in the PR body. |
 | `source/lib/xmp_core`, `expat_lib`, `md5_lib`, `tiny_jpeg`, `source/app/common/cJSON` | Vendored. `xmp_core` carries the locking fix and `tiny_jpeg` the batched writer and 4:2:0 path; otherwise keep diffs minimal and never restyle. |
 | `source/app/common/argument_parser` | Mixed: `program_options_lite.*` is vendored ITU/ISO BSD; `argument_parser.*` is first-party. |
-| `scripts` | First-party. The build-flag matrix, the conversion pipeline over a folder of samples, the lens-profile fitting tool. |
+| `scripts` | First-party. The build-flag matrix, the conversion pipeline over a folder of samples, the lens-profile fitting tool, and `review_pr.sh` and `merge_pr.sh`, which `/review` and `/merge` run (shared with `gpraw/gpr`). |
 | `.github/workflows` | The build-flag matrix on hosted Ubuntu x86_64 and macOS arm64 runners. |
+| `.claude/skills`, `.claude/settings.json` | First-party, tracked, and shared with `gpraw/gpr`. The routines Claude Code and Cursor load (`/review`, `/merge`, `/coverage`, `/pr`, `/next`) and the reviewed allowlist. |
 
-Ignore entirely: `build/` (gitignored) and anything under `scripts/out` or
-`out/`.
+Ignore entirely: `build/` (gitignored), anything under `scripts/out` or
+`out/`, and `.claude/worktrees/` (other sessions' checkouts, holding their
+own copies of the tree: greps will hit them, and they are not the live
+source).
 
 ## Build and test
 
@@ -122,6 +129,192 @@ own, and all off: seven configure-and-build passes. CI
 scalar) and `macos-latest` (arm64, NEON) and then `ctest` on the baseline
 build. It is the check most PRs actually trip; reason about the matrix when
 reviewing.
+
+## Cursor and Claude Code
+
+`.claude/skills/` and `.claude/settings.json` are tracked;
+`.claude/settings.local.json` (per-machine approvals) and
+`.claude/worktrees/` are not. Cursor and Claude Code both load
+`.claude/skills/`, and Cursor does not load `.claude/commands/`, so the
+routines live there and the slash names are the same in either tool. Leave
+`CLAUDE.md` under this name: both tools read it, and `scripts/review_pr.sh`
+looks it up by this filename.
+
+These files, and `scripts/review_pr.sh` and `scripts/merge_pr.sh`, are the
+same in `gpraw/gpr`, byte for byte, so nothing in them assumes which of the
+two repositories it is in. What differs is asked at run time: git or GitHub
+names the default branch (`master` here, `main` there), `.github/workflows/`
+shows which workflows exist, and this file says what else a change owes,
+its sections found by heading, never by number (the two files number their
+review standards differently). This repository has no Claude workflow in
+CI. `gpraw/gpr` has two, a single-model review and a test-gap pass, and the
+routines name them only to say what happens where they exist.
+
+- **`/review <pr>`** has `scripts/review_pr.sh` review the PR's head with
+  several models at once, on one brief
+  (`.claude/skills/review/reviewer-brief.md`), against the review standards
+  below. Who reviews is an argument, not code: a reviewer is `<cli>:<model>`
+  for one of the three CLIs the script drives (`claude`, `grok`, and
+  `gemini` through Antigravity's `agy`), and `--reviewers` takes a list of
+  them. With none named the script's `DEFAULT_REVIEWERS` apply, today
+  `claude:claude-opus-5-5,gemini:gemini-3.8-flash-high`; Grok 4.7 and
+  Claude Fable 5.1 review only when named. No reviewer can run a command or
+  write a file, so before they start the script checks that each changed
+  shell or Python file still parses and hands the answers over as
+  `checks.md`. The standard is the base branch's `CLAUDE.md`. The head's
+  copy is moved to `head-CLAUDE.md` before any reviewer runs, because Grok
+  loads a `CLAUDE.md` it finds while reading and a deeper file overrides
+  the one it was given; the diff still carries the edit. The brief has each
+  reviewer search the tree for every other copy of a fact the diff changes
+  (a stale "About this fork" section among them), and read the change a
+  second time against "Minimal diff, and in sync" for design findings, each
+  of which needs a precedent at `file:line` and a named cost.
+
+  A reviewer whose CLI is not installed, or a Claude or Grok reviewer whose
+  subscription allowance is spent, is skipped and says so, and the rest go
+  on; one that fails otherwise is a failure, which `--only <cli>:<model>`
+  re-runs alone against the same head before reconciling again. After
+  every run a Claude model reconciles the reviews that finished, headless
+  and read-only (`claude -p` under
+  `--restricted`, with Read, Grep and Glob only, on
+  `.claude/skills/review/reconciler-brief.md`), trying to refute every
+  blocking finding before it confirms one, a finding every reviewer agrees
+  on included. That model is `claude-opus-5-5` unless `--reconciler` names
+  another, with no fallback unless `--reconcile-fallback` names one, since a
+  second run of the same model would draw on the same spent allowance. Its
+  report becomes `summary.md` only when the run finished on the model asked
+  for, has a Blocking section and ends with `END OF REPORT`;
+  `--reconcile <pr>` repeats only that step, on the reviews already there.
+  `--post` posts the report as one standing comment
+  (`<!-- gpr-dual-review -->`), edited in place by a later run, with every
+  full review collapsed below it, and `GPR_REVIEW_NO_POST=1` makes it a
+  rehearsal that changes nothing on GitHub or in the review's files. The `needs-coverage` label it
+  settles in `gpraw/gpr` starts `claude-test-gap-check.yml`, which this
+  repository does not have: the script finds no such workflow on the base
+  branch, leaves the label alone, and its `label:` line says there is no
+  test-gap pass to start. The script is not in the allowlist: it posts to
+  GitHub and sends the diff to every reviewer's company (Anthropic and
+  Google by default, xAI when Grok is named). The skill pre-approves it only
+  while `/review` runs. A URL that names a pull request in another
+  repository is refused before anything is checked out.
+- **`/merge <pr>`** has `scripts/merge_pr.sh` merge the PR into the default
+  branch and clean up after it. The default branch is GitHub's answer, from
+  the one `gh repo view` call that also names the repository, and every
+  message prints it. So is the method: the one GitHub's merge button offers
+  the `gh` user on this repository when that is a squash or a rebase merge
+  the settings allow, else a squash where they allow one, else a rebase
+  merge, and with neither allowed it refuses to merge. Here that is a
+  rebase merge, which lands each commit with its own message and so keeps
+  the README, CLAUDE.md and workflow commits apart from the code commits
+  `gpraw/gpr` cherry-picks; a squash merge made by hand here can turn the
+  button, and the script, to squashing, so a `Squash-merging` line is worth
+  a look. Every check that can stop it runs before anything changes. The
+  first is that the PR is this repository's: a URL can name one anywhere,
+  and every later step would bring its number and branch name back here.
+  Then the PR must be open, not a draft, into the default branch from a
+  branch of this repository, and mergeable; no uncommitted changes to
+  tracked files; the local default branch able to fast-forward; any local
+  copy of the branch exactly at the PR's head. On the default branch with
+  no PR named it refuses. The merge is pinned to that head with
+  `--match-head-commit`. Only once GitHub reports the PR merged does it
+  retarget the open PRs stacked on the branch to the default branch, delete
+  the branch on origin, switch to the default branch, fast-forward it and
+  delete the local branch. Deleting a branch with a push closes every open
+  PR based on it, and a closed PR whose base branch is gone can be neither
+  reopened nor retargeted, so origin's branch goes only once GitHub lists
+  no open PR based on it. When another worktree has the default branch
+  checked out, this checkout is detached at origin's default branch
+  instead, and the default branch is left to be pulled there. `--dry-run`
+  runs every check and changes nothing, and it counts before the PR or
+  after it; an option the script does not know, a second PR or an empty
+  argument stops it with nothing changed. An unquoted `#195` starts a shell
+  comment, so the skill passes the bare number. The script is out of the
+  allowlist for the same reason as `review_pr.sh`, and the skill
+  pre-approves it only while `/merge` runs.
+- **`/coverage`** writes the case the branch's change owes, against the
+  Testing standards below, the way `.claude/skills/coverage/brief.md` says.
+  It reads the diff from the merge base with the default branch,
+  uncommitted edits included, looks for a case that already covers it, and
+  otherwise writes one, then builds and runs the suite with the commands in
+  "Build and test" until it is green. The brief applies this file's two
+  rules for tests that must carry across: a case goes against the
+  `gpr_tools` conversion layer so that it cherry-picks, and one that would
+  need a fixture private to `gpraw/gpr` degrades to what ships here. It
+  commits, pushes and posts nothing; a case that will not go green is taken
+  back out and reported, and no file is reverted, since the operator's own
+  edits may be in it. In `gpraw/gpr` the same brief is read into CI's
+  `claude-test-gap-check.yml`; this repository has no such workflow, so
+  `/coverage` is the only test-gap pass a change gets here.
+- **`/pr`** opens the pull request in the order the pieces depend on: the
+  suite's tally is the body's verification line, so the case comes before
+  the body, and the body before the push, since the push starts CI. It
+  refuses to run on the default branch, and stops on an open pull request
+  for the branch or on uncommitted edits that are not the case. Two of its
+  steps come from this file. First the README contract: when the change is
+  one the "About this fork" section must describe and the branch does not
+  update it, `/pr` stops before anything is committed and says what the
+  section is missing; it does not write it. Then, after `/coverage` has run
+  and the case is committed on its own, the cherry-pick "Land it here first"
+  asks for: in a detached scratch worktree of a local `gpraw/gpr` clone
+  (found beside this checkout's main worktree by the `origin` its
+  `.git/config` names, or asked for), at that repository's default branch
+  as origin has it and under `build/carry/`, it cherry-picks the code
+  commits (every commit that is not only `README.md`, `CLAUDE.md` or
+  `.github/` edits), builds and runs that repository's suite as its
+  CLAUDE.md says, makes the byte-for-byte comparison this file asks of a
+  port or of a change that should leave output unchanged while both builds
+  are at hand, and removes the worktree. A conflict is aborted and
+  reported, not resolved, and neither it nor a red suite there stops the
+  pull request. Nothing is pushed from that worktree, the clone's own
+  checkout is not touched, and the `git -C` commands prompt. The body,
+  drafted to the PR conventions below and written to
+  `build/pr/<branch>.md`, states the README outcome and the cherry-pick
+  outcome either way. Then a plain push and `gh pr create` against the
+  default branch. It says when the branch is behind the default branch and
+  leaves catching up to the operator. Nothing in it force-pushes or
+  rebases.
+- **`/next`** says what has to be done next, in order. It reads the
+  session's own conversation first (what was set out to do, decisions made
+  and still open, what was promised and not done), then the working tree,
+  the branch's pull request (the flag matrix, and whether the `/review`
+  comment is of the current head), the other open pull requests, and what
+  the sync rules above leave owing: a merged change's cherry-pick into
+  `gpraw/gpr`, looked for there by title; an upstream `gopro/gpr` `master`
+  this repository has not merged, read from upstream's own URL and never
+  from `origin/gopro/gpr`, which is this fork's delta replayed for GoPro;
+  the README section a change must update; and, as a decision rather than
+  a step, a change merged in `gpraw/gpr` that "Borrow from downstream" may
+  want here. It answers with steps in
+  dependency order, each with its command and the evidence that makes it
+  next, and stops at a decision that is the operator's. It runs none of
+  them: it changes no file and nothing on GitHub, and what it pre-approves
+  only reads or fetches.
+
+`/coverage`, `/pr` and `/next` have no script: the work is judgment, and the
+mechanical half is a few commands each skill's `allowed-tools` pre-approves
+while it runs, `git push -u origin HEAD` and `gh pr create` among them for
+`/pr`.
+
+`.claude/settings.json` is the reviewed allowlist, one file for both
+repositories: the configure, build and test loop in both repositories'
+spellings, each command exactly as "Build and test" writes it (the
+configure with and without `-DCMAKE_BUILD_TYPE=Release`, the build alone,
+with `-j` or with `--target gpr_tools_tests`, `ctest` with and without
+`--output-on-failure` and `-C`) and the test binary under `build/` with
+its arguments, `bash -n` on a script, read-only `gh` and read-only `git`.
+Every rule is project-relative, so it holds in any checkout. Two rules for
+editing it. A prefix rule is a string match with no flag-level analysis, so
+a wildcard admits every flag form of the command it names: that is why
+`git log *` and `git diff --stat *` are not in it (`--output=` writes an
+arbitrary file), why `cmake` and `ctest` are named whole rather than with
+a trailing wildcard (`-B`, `--graphviz`, `ctest -O` and `--output-junit`
+write anywhere, `ctest -S` runs a script, and a build's `-- -f <makefile>`
+runs arbitrary shell; each was run to check), and why there is no `gh api`
+rule at all, a GET being inexpressible as a prefix.
+And the line is where a command's effects land, not whether it has any:
+inside the working tree is in, outside it is out. So `gh pr create`,
+pushes and both scripts stay out and prompt, except while a skill that
+pre-approves them runs.
 
 ## Review standards
 
