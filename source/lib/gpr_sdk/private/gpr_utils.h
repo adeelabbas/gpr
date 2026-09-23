@@ -24,6 +24,7 @@
 
 #include "gpr_buffer_auto.h"
 #include "dng_image.h"
+#include "dng_simple_image.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -36,6 +37,11 @@ extern "C" {
     void CopyRawImageToBuffer( const dng_image& raw_image, gpr_buffer_auto& buffer, const dng_rect* crop_area = NULL );
 
     void CopyBufferToRawImage( const gpr_buffer_auto& buffer, size_t buffer_stride, dng_image& raw_image );
+
+    // CopyBufferToRawImage for samples held in the top bits of their 16-bit words: each is shifted
+    // down by `shift` (the bits below it are dropped) on its way into the image's own buffer, so
+    // the copy is still the only pass over the frame.
+    void CopyLeftJustifiedBufferToRawImage( const gpr_buffer_auto& buffer, size_t buffer_stride, unsigned int shift, dng_simple_image& raw_image );
 
 #ifdef __cplusplus
 }

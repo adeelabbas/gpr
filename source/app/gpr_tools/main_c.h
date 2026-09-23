@@ -20,6 +20,7 @@
 #define MAIN_C_H
 
 #include <stddef.h>
+#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -35,6 +36,12 @@ extern "C" {
         size_t          input_skip_rows;
         size_t          input_skip_cols;
         const char*     input_pixel_format;
+        bool            input_left_justified;    /* RAW input only: samples sit in the top bits of each
+                                                    16-bit word (12-bit data with the low 4 bits zero,
+                                                    14-bit with the low 2 bits zero). Passed to the SDK
+                                                    as gpr_parameters::input_left_justified, which shifts
+                                                    them down and ignores the bits below. Fails the
+                                                    conversion for GPR/DNG input and packed formats. */
 
         const char*     output_file_path;
         const char*     output_format;           /* Optional override of the format implied by the output file extension (GPR or DNG) */

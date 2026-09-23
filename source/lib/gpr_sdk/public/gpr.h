@@ -75,6 +75,16 @@
             unsigned int        input_skip_cols;               /* Columns to skip at the left of the raw image before encoding,
                                                                   to shift the horizontal Bayer phase (e.g. BGGR -> GBRG) */
 
+            bool                input_left_justified;          /* The raw input carries each sample in the top bits of its 16-bit
+                                                                  word (as some cameras write them) rather than the bottom: the
+                                                                  sample is word >> (16 - the pixel format's 12 or 14 bits), and
+                                                                  the bits below it are ignored. The shift happens in the pass
+                                                                  that already reads every sample, so it costs no extra pass.
+                                                                  For gpr_convert_raw_to_gpr and gpr_convert_raw_to_dng with an
+                                                                  unpacked pixel format. The conversions from DNG, GPR and VC5
+                                                                  input encode samples they decode themselves, right-justified:
+                                                                  leave it false for them. false from gpr_parameters_set_defaults. */
+
             bool                compute_md5sum;
             
             gpr_buffer          gpmf_payload;   /* GPMF payload of image file */

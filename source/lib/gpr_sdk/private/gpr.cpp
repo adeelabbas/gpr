@@ -447,6 +447,31 @@ static void set_vc5_encoder_parameters( vc5_encoder_parameters& vc5_encoder_para
         default:
             break;
     }
+
+    // Samples still in the top bits of their words go to the encoder's 16 bit formats, which take
+    // the top 12 bits in the pass that unpacks the frame: the shift costs no pass of its own.
+    if( convert_params->input_left_justified )
+    {
+        switch ( convert_params->tuning_info.pixel_format )
+        {
+            case PIXEL_FORMAT_RGGB_12:
+            case PIXEL_FORMAT_RGGB_14:
+                vc5_encoder_params.pixel_format = VC5_ENCODER_PIXEL_FORMAT_RGGB_16;
+                break;
+
+            case PIXEL_FORMAT_GBRG_12:
+                vc5_encoder_params.pixel_format = VC5_ENCODER_PIXEL_FORMAT_GBRG_16;
+                break;
+
+            case PIXEL_FORMAT_BGGR_12:
+            case PIXEL_FORMAT_BGGR_14:
+                vc5_encoder_params.pixel_format = VC5_ENCODER_PIXEL_FORMAT_BGGR_16;
+                break;
+
+            default:
+                break;
+        }
+    }
     
     vc5_encoder_params.quality_setting = (VC5_ENCODER_QUALITY_SETTING)convert_params->quality;
 
@@ -1502,6 +1527,17 @@ static void write_dng(const gpr_allocator*          allocator,
     }
     
     unsigned int input_pitch = convert_params->input_pitch;
+
+    // input_left_justified describes RAW input (see gpr.h); the packed formats have no
+    // justification. The samples are shifted down by whichever pass below reads them first --
+    // the black-level subtraction, the copy into the DNG image or the encoder's unpacking --
+    // so no pass is added for it.
+    const bool left_justified = convert_params->input_left_justified &&
+                                convert_params->tuning_info.pixel_format != PIXEL_FORMAT_GBRG_12P &&
+                                convert_params->tuning_info.pixel_format != PIXEL_FORMAT_RGGB_12P;
+
+    const unsigned int left_justified_shift = ( convert_params->tuning_info.pixel_format == PIXEL_FORMAT_RGGB_14 ||
+                                                convert_params->tuning_info.pixel_format == PIXEL_FORMAT_BGGR_14 ) ? 2 : 4;
     
     if( ( convert_params->tuning_info.pixel_format == PIXEL_FORMAT_GBRG_12P ||
           convert_params->tuning_info.pixel_format == PIXEL_FORMAT_RGGB_12P ) &&
@@ -1537,13 +1573,27 @@ static void write_dng(const gpr_allocator*          allocator,
             uint16_t*       dst = normalized_buffer.to_uint16_t();
 
             const int range = white - black;
-            for( size_t i = 0; i < count; i++ )
+            if( left_justified )
             {
-                int v = (int)src[i] - black;
-                if( v < 0 ) v = 0;
-                v = (int)( (int64_t)v * white / range );
-                if( v > white ) v = white;
-                dst[i] = (uint16_t)v;
+                for( size_t i = 0; i < count; i++ )
+                {
+                    int v = (int)( src[i] >> left_justified_shift ) - black;
+                    if( v < 0 ) v = 0;
+                    v = (int)( (int64_t)v * white / range );
+                    if( v > white ) v = white;
+                    dst[i] = (uint16_t)v;
+                }
+            }
+            else
+            {
+                for( size_t i = 0; i < count; i++ )
+                {
+                    int v = (int)src[i] - black;
+                    if( v < 0 ) v = 0;
+                    v = (int)( (int64_t)v * white / range );
+                    if( v > white ) v = white;
+                    dst[i] = (uint16_t)v;
+                }
             }
 
             raw_image_buffer = &normalized_buffer;
@@ -1551,7 +1601,13 @@ static void write_dng(const gpr_allocator*          allocator,
         }
     }
 
-    if( vc5_dng == false && use_prebuilt == false )
+    // image is the dng_simple_image allocated above whenever no prebuilt one is used.
+    if( vc5_dng == false && use_prebuilt == false && left_justified )
+    {
+        CopyLeftJustifiedBufferToRawImage( *raw_image_buffer, input_pitch / sizeof(short), left_justified_shift,
+                                           *static_cast<dng_simple_image*>( image.Get() ) );
+    }
+    else if( vc5_dng == false && use_prebuilt == false )
     {
         CopyBufferToRawImage( *raw_image_buffer, input_pitch / sizeof(short), *(image.Get()) );
     }
@@ -1929,6 +1985,10 @@ static void write_dng(const gpr_allocator*          allocator,
         // The preview is generated from the (already black-subtracted) encoded data, so its
         // black level must be 0 too -- otherwise it would be subtracted a second time.
         gpr_parameters enc_params = *convert_params;
+
+        // The black-level pass already moved the samples down; otherwise the encoder does it.
+        enc_params.input_left_justified = left_justified && black_normalized == false;
+
         if( black_normalized )
         {
             enc_params.tuning_info.static_black_level.r_black   = 0;

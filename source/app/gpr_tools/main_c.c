@@ -334,6 +334,26 @@ int dng_convert_main( const dng_convert_params* convert_params )
     }
     
 
+    // --input_left_justified: some cameras (e.g. Verkada: 12-bit, low 4 bits zero) write RAW
+    // samples in the top bits of each 16-bit word. The SDK shifts them down in the pass that
+    // already reads every sample; it has no meaning for GPR/DNG input or packed formats.
+    if( convert_params->input_left_justified )
+    {
+        if( input_file_type != FILE_TYPE_RAW )
+        {
+            fprintf( stderr, "--input_left_justified is only supported for RAW input\n" );
+            return -1;
+        }
+
+        if( pixel_format_is_packed( params.tuning_info.pixel_format ) )
+        {
+            fprintf( stderr, "--input_left_justified does not apply to packed pixel formats\n" );
+            return -1;
+        }
+
+        params.input_left_justified = true;
+    }
+
     if( gpmf_file_path != NULL && strcmp(gpmf_file_path, "") )
     {
         read_from_file( &params.gpmf_payload, gpmf_file_path, allocator.Alloc, allocator.Free );

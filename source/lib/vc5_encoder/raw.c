@@ -674,3 +674,210 @@ void UnpackImage_12P(const PACKED_IMAGE *input, UNPACKED_IMAGE *output, ENABLED_
     }
 }
 
+/** ------------------------------------------- **/
+/** 16 BIT INPUT FORMAT (LEFT-JUSTIFIED SAMPLES) **/
+/** ------------------------------------------- **/
+
+// Each 16-bit word holds a 12 or 14 bit sample in its top bits, as some cameras write them.
+// The log curve takes the top 12 bits (>> 4), the same bits the 14 bit format takes with >> 2,
+// so the shift rides on the one read of each sample and a left-justified frame encodes to the
+// same bitstream as its right-justified equivalent. Kept apart from the 12 and 14 bit
+// routines so their code is untouched.
+
+static void UnpackPixel_16(uint16_t *input_row1_ptr, uint16_t *input_row2_ptr, int column, PIXEL *output_buffer[], BAYER_ORDERING bayer_ordering )
+{
+    uint16_t R1, G1, G2, B1;
+    uint16_t GS, GD, RG, BG;
+
+    uint16_t *GS_output_row_ptr = (uint16_t *)output_buffer[0];
+    uint16_t *GD_output_row_ptr = (uint16_t *)output_buffer[3];
+    uint16_t *RG_output_row_ptr = (uint16_t *)output_buffer[1];
+    uint16_t *BG_output_row_ptr = (uint16_t *)output_buffer[2];
+
+    const int internal_precision = 12;
+    const int32_t midpoint = (1 << (internal_precision - 1));
+
+    if( bayer_ordering == BAYER_ORDERING_RGGB )
+    {
+        R1 = input_row1_ptr[2 * column + 0];
+        G1 = input_row1_ptr[2 * column + 1];
+        G2 = input_row2_ptr[2 * column + 0];
+        B1 = input_row2_ptr[2 * column + 1];
+    }
+    else if( bayer_ordering == BAYER_ORDERING_BGGR )
+    {
+        B1 = input_row1_ptr[2 * column + 0];
+        G1 = input_row1_ptr[2 * column + 1];
+        G2 = input_row2_ptr[2 * column + 0];
+        R1 = input_row2_ptr[2 * column + 1];
+    }
+    else
+    {
+        G1 = input_row1_ptr[2 * column + 0];
+        B1 = input_row1_ptr[2 * column + 1];
+        R1 = input_row2_ptr[2 * column + 0];
+        G2 = input_row2_ptr[2 * column + 1];
+    }
+
+    // Apply protune log curve
+    R1 = EncoderLogCurve[ R1 >> 4 ];
+    G1 = EncoderLogCurve[ G1 >> 4 ];
+    G2 = EncoderLogCurve[ G2 >> 4 ];
+    B1 = EncoderLogCurve[ B1 >> 4 ];
+    
+    // Difference the green components and subtract green from the red and blue components
+    GS = (G1 + G2) >> 1;
+    GD = (G1 - G2 + 2 * midpoint) >> 1;
+    RG = (R1 - GS + 2 * midpoint) >> 1;
+    BG = (B1 - GS + 2 * midpoint) >> 1;
+    
+    GS_output_row_ptr[column] = clamp_uint(GS, internal_precision);
+    GD_output_row_ptr[column] = clamp_uint(GD, internal_precision);
+    RG_output_row_ptr[column] = clamp_uint(RG, internal_precision);
+    BG_output_row_ptr[column] = clamp_uint(BG, internal_precision);
+}
+
+#if ENABLED(GPR_NEON)
+
+#define UnpackPixel_16_8x UnpackPixel_16_8x_NEON_
+static void UnpackPixel_16_8x_NEON_(uint16_t *input_row1_ptr, uint16_t *input_row2_ptr, int column, PIXEL *output_buffer[], BAYER_ORDERING bayer_ordering )
+{
+    int i;    
+    uint16x8x2_t row_1, row_2;
+
+    const int internal_precision = 12;
+    const int32_t midpoint = (1 << (internal_precision - 1));
+    
+    // Apply protune log curve
+    {
+        uint16_t input_row1_12b[16];
+        uint16_t input_row2_12b[16];
+
+        for (i = 0; i < 16; ++i)
+        {
+            input_row1_12b[i] = EncoderLogCurve[ input_row1_ptr[2 * column + i] >> 4 ];
+            input_row2_12b[i] = EncoderLogCurve[ input_row2_ptr[2 * column + i] >> 4 ];
+        }
+
+        row_1 = vld2q_u16( input_row1_12b  );
+        row_2 = vld2q_u16( input_row2_12b  );
+    }
+
+    int16x8_t R1, G1, G2, B1;
+
+    // NEON path handles only RGGB / GBRG; BGGR is routed to the scalar path.
+    if( bayer_ordering == BAYER_ORDERING_RGGB )
+    {
+        R1 = vreinterpretq_s16_u16( row_1.val[0] );
+        G1 = vreinterpretq_s16_u16( row_1.val[1] );
+        G2 = vreinterpretq_s16_u16( row_2.val[0] );
+        B1 = vreinterpretq_s16_u16( row_2.val[1] );
+    }
+    else
+    {
+        G1 = vreinterpretq_s16_u16( row_1.val[0] );
+        B1 = vreinterpretq_s16_u16( row_1.val[1] );
+        R1 = vreinterpretq_s16_u16( row_2.val[0] );
+        G2 = vreinterpretq_s16_u16( row_2.val[1] );
+    }
+    
+    int16x8_t GS, GD, RG, BG;
+    
+    GS = vhaddq_s16(G1, G2);
+    vst1q_s16( output_buffer[0] + column, GS );
+    
+    {
+        const int16x8_t __midpoint_x2   = vdupq_n_s16(midpoint * 2);
+
+        GD = vsubq_s16(G1, G2);
+        GD = vhaddq_s16(GD, __midpoint_x2);
+        vst1q_s16( output_buffer[3] + column, GD );
+        
+        GS = vsubq_s16( __midpoint_x2, GS );
+    }
+
+    RG = vhaddq_s16(R1, GS);
+    vst1q_s16( output_buffer[1] + column, RG );
+    
+    BG = vhaddq_s16(B1, GS);
+    vst1q_s16( output_buffer[2] + column, BG );
+}
+
+#else
+
+#define UnpackPixel_16_8x UnpackPixel_16_8x_C_
+static void UnpackPixel_16_8x_C_(uint16_t *input_row1_ptr, uint16_t *input_row2_ptr, int column, PIXEL *output_buffer[], BAYER_ORDERING bayer_ordering )
+{
+    int i;
+    for ( i = 0; i < 8; i++)
+    {
+        UnpackPixel_16(input_row1_ptr, input_row2_ptr, column + i, output_buffer, bayer_ordering );
+    }
+}
+
+#endif
+
+void UnpackImage_16(const PACKED_IMAGE *input, UNPACKED_IMAGE *output, ENABLED_PARTS enabled_parts, BAYER_ORDERING bayer_ordering )
+{
+    uint8_t *input_buffer = (uint8_t *)input->buffer + input->offset;
+    
+    const DIMENSION input_width     = input->width / 2;
+    const DIMENSION input_width_m8  = (input_width / 8) * 8;
+    
+    const DIMENSION input_height = input->height / 2;
+    
+    size_t input_pitch = input->pitch;
+    
+    PIXEL *output_row_ptr_array[MAX_CHANNEL_COUNT];
+    uint32_t output_row_ptr_array_pitch[MAX_CHANNEL_COUNT];
+    
+    uint16_t *input_row_ptr = (uint16_t*)input_buffer;
+
+    int channel_number;
+
+    int row;
+
+    for (channel_number = 0; channel_number < MAX_CHANNEL_COUNT; channel_number++)
+    {
+        output_row_ptr_array[channel_number] = (PIXEL *)(output->component_array_list[channel_number].data);
+        
+        // output->component_array_list[channel_number].pitch is pitch in bytes, so we need to convert it to pitch in PIXELS
+        output_row_ptr_array_pitch[channel_number] = (output->component_array_list[channel_number].pitch / sizeof(PIXEL));
+    }
+    
+    for (row = 0; row < input_height; row++)
+    {
+        uint16_t* input_row2_ptr = input_row_ptr + (input_pitch / sizeof(uint16_t));
+        
+        int column = 0;
+        
+        // Unpack the row of Bayer components from the BYR4 pattern elements.
+        // BGGR is not implemented in the (NEON) 8x path, so handle it per-pixel.
+        if( bayer_ordering == BAYER_ORDERING_BGGR )
+        {
+            for (; column < input_width; column++)
+            {
+                UnpackPixel_16(input_row_ptr, input_row2_ptr, column, output_row_ptr_array, bayer_ordering );
+            }
+        }
+        else
+        {
+            for (; column < input_width_m8; column+= 8)
+            {
+                UnpackPixel_16_8x(input_row_ptr, input_row2_ptr, column, output_row_ptr_array, bayer_ordering );
+            }
+
+            for (; column < input_width; column++)
+            {
+                UnpackPixel_16(input_row_ptr, input_row2_ptr, column, output_row_ptr_array, bayer_ordering );
+            }
+        }
+        
+        input_row_ptr += input_pitch;
+        
+        for (channel_number = 0; channel_number < MAX_CHANNEL_COUNT; channel_number++)
+        {
+            output_row_ptr_array[channel_number] += output_row_ptr_array_pitch[channel_number];
+        }
+    }
+}

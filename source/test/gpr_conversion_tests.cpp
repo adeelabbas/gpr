@@ -41,6 +41,7 @@
 #include "gpr.h"
 #include "gpr_flat_write_stream.h"
 #include "gpr_lens_profiles.h"
+#include "gpr_print_utils.h"     // gpr_tools' metadata printer (gpr_parameters_print_json)
 #include "main_c.h"              // gpr_tools' CLI conversion layer (dng_convert_main)
 #include "program_options_lite.h" // gpr_tools' command-line scanner
 
@@ -1680,6 +1681,193 @@ static void run_lens_correction_cli_tests( const std::string& data_dir )
 }
 
 // ---------------------------------------------------------------------------
+// gpr_tools --input_left_justified (dng_convert_main), RAW -> GPR / DNG
+//
+// Some cameras write RAW samples in the top bits of each 16-bit word. The SDK
+// (gpr_parameters::input_left_justified) takes the sample from the top bits in
+// whichever pass reads it first, so a left-justified frame has to convert to
+// exactly the bytes its right-justified twin does: the existing RAW path is the
+// ground truth, and the bits below the sample are ignored. Uses the CLI sample's
+// dimensions, so it runs after run_preview_cli_tests.
+// ---------------------------------------------------------------------------
+
+// A w x h frame of `bits`-bit samples from a fixed formula, moved up by `shift` bits. With
+// `junk`, the `shift` bits below each sample are filled from a second formula as well. The
+// samples are a ramp with a small texture on top, which compresses like an image: a frame of
+// noise can outgrow the encoder's output buffer, fixed at half the raw size.
+static std::vector<uint16_t> synthetic_raw( unsigned int w, unsigned int h, unsigned int bits, unsigned int shift, bool junk = false )
+{
+    const size_t   count = (size_t)w * h;
+    const unsigned mask  = ( 1u << bits ) - 1;
+    const unsigned below = ( 1u << shift ) - 1;
+
+    std::vector<uint16_t> px( count );
+    for( size_t i = 0; i < count; i++ )
+    {
+        const unsigned sample = ( ( i % w + i / w ) * 2 + ( ( i * 131 + 7 ) & 0x1F ) ) & mask;
+        px[i] = (uint16_t)( ( sample << shift ) | ( junk ? ( ( i * 7 + 3 ) & below ) : 0 ) );
+    }
+    return px;
+}
+
+static bool save_raw( const std::string& path, const std::vector<uint16_t>& px )
+{
+    return save_file( path.c_str(), &px[0], px.size() * sizeof(uint16_t) );
+}
+
+// dng_convert_params for a w x h RAW input.
+static dng_convert_params raw_cli_params( const char* input, const char* output, unsigned int w, unsigned int h,
+                                          const char* pixel_format, bool left_justified )
+{
+    dng_convert_params p = preview_cli_params( input, output, "" );
+    p.input_width          = w;
+    p.input_height         = h;
+    p.input_pixel_format   = pixel_format;
+    p.input_left_justified = left_justified;
+    return p;
+}
+
+// Converts the right-justified frame and its left-justified twin (with `junk` below the samples)
+// to `output`, optionally with a metadata file, and checks the two outputs are byte-identical.
+static void check_left_justified_matches( const char* format, unsigned int bits, unsigned int w, unsigned int h,
+                                          const char* output, bool vc5, bool junk, const char* metadata )
+{
+    const std::string right = scratch_path( "lj_right.RAW" );
+    const std::string left  = scratch_path( "lj_left.RAW" );
+    check( save_raw( right, synthetic_raw( w, h, bits, 0 ) ), "right-justified input written" );
+    check( save_raw( left,  synthetic_raw( w, h, bits, 16 - bits, junk ) ), "left-justified input written" );
+
+    const std::string out_r = scratch_path( "lj_r_" ) + output;
+    const std::string out_l = scratch_path( "lj_l_" ) + output;
+
+    dng_convert_params pr = raw_cli_params( right.c_str(), out_r.c_str(), w, h, format, false );
+    dng_convert_params pl = raw_cli_params( left.c_str(),  out_l.c_str(), w, h, format, true );
+    pr.metadata_file_path = metadata;
+    pl.metadata_file_path = metadata;
+    check( dng_convert_main( &pr ) == 0, "right-justified conversion succeeds" );
+    check( dng_convert_main( &pl ) == 0, "left-justified conversion succeeds" );
+    std::remove( right.c_str() );
+    std::remove( left.c_str() );
+
+    Buffer r, l;
+    const bool loaded = load_file( out_r.c_str(), r ) && load_file( out_l.c_str(), l );
+    std::remove( out_r.c_str() );
+    std::remove( out_l.c_str() );
+    check( loaded, "outputs written" );
+    if( !loaded ) return;
+
+    validate_dng_like( l, w, h, vc5 );
+    check( l.b.size == r.b.size && std::memcmp( l.b.buffer, r.b.buffer, l.b.size ) == 0,
+           "output byte-identical to the right-justified conversion" );
+}
+
+// Writes gpr_tools metadata (as -d prints it) for a w x h RAW frame of `format` with the given
+// black and white levels. Returns false if the file could not be written.
+static bool write_raw_metadata( const std::string& path, unsigned int w, unsigned int h, GPR_PIXEL_FORMAT format,
+                                int black, int white )
+{
+    gpr_parameters params;
+    gpr_parameters_set_defaults( &params );
+    params.input_width              = w;
+    params.input_height             = h;
+    params.input_pitch              = w * 2;
+    params.tuning_info.pixel_format = format;
+    params.tuning_info.static_black_level.r_black   = black;
+    params.tuning_info.static_black_level.g_r_black = black;
+    params.tuning_info.static_black_level.g_b_black = black;
+    params.tuning_info.static_black_level.b_black   = black;
+    params.tuning_info.dgain_saturation_level.level_red        = white;
+    params.tuning_info.dgain_saturation_level.level_green_even = white;
+    params.tuning_info.dgain_saturation_level.level_green_odd  = white;
+    params.tuning_info.dgain_saturation_level.level_blue       = white;
+
+    const bool written = gpr_parameters_print_json( &params, path.c_str() ) == 0;
+    gpr_parameters_destroy( &params, g_alloc.Free );
+    return written;
+}
+
+static void run_left_justified_cli_tests()
+{
+    std::fprintf( stdout, "\n== gpr_tools --input_left_justified (dng_convert_main) ==\n" );
+
+    if( g_cli_sample.empty() )
+    {
+        run_case( "--input_left_justified: CLI sample", []{ check( false, "run_preview_cli_tests must run first (no CLI sample loaded)" ); } );
+        return;
+    }
+
+    // GPR output goes through the encoder's 16 bit unpack: RGGB and GBRG take its NEON kernel,
+    // BGGR the per-pixel one, and the (W-2) x (H-2) frame, 1999 pixels a row, leaves 7 of each
+    // row to the per-pixel tail. DNG output goes through the copy into the image; the 14 bit
+    // formats shift by 2 there rather than 4. Metadata with black 0 and the format's own white
+    // level keeps the black-level pass out of the way, and gives the GBRG output the 12 bit white
+    // level the reader needs to recognise it.
+    run_case( "--input_left_justified: output byte-identical to the right-justified input", []{
+        const struct { const char* format; GPR_PIXEL_FORMAT pixel_format; unsigned int bits; } formats[] = {
+            { "rggb12", PIXEL_FORMAT_RGGB_12, 12 }, { "gbrg12", PIXEL_FORMAT_GBRG_12, 12 },
+            { "bggr12", PIXEL_FORMAT_BGGR_12, 12 }, { "rggb14", PIXEL_FORMAT_RGGB_14, 14 },
+        };
+        const struct { const char* name; unsigned int w, h; bool vc5; } outputs[] = {
+            { "lj_out.GPR",  g_cli_W,     g_cli_H,     true  },
+            { "lj_tail.GPR", g_cli_W - 2, g_cli_H - 2, true  },
+            { "lj_out.DNG",  g_cli_W,     g_cli_H,     false },
+        };
+
+        const std::string json = scratch_path( "lj_meta.json" );
+        for( size_t f = 0; f < sizeof(formats) / sizeof(formats[0]); ++f )
+        {
+            for( size_t o = 0; o < sizeof(outputs) / sizeof(outputs[0]); ++o )
+            {
+                check( write_raw_metadata( json, outputs[o].w, outputs[o].h, formats[f].pixel_format,
+                                           0, ( 1 << formats[f].bits ) - 1 ), "metadata written" );
+                check_left_justified_matches( formats[f].format, formats[f].bits, outputs[o].w, outputs[o].h,
+                                              outputs[o].name, outputs[o].vc5, /*junk=*/false, json.c_str() );
+            }
+        }
+        std::remove( json.c_str() );
+    });
+
+    run_case( "--input_left_justified: the bits below each sample are ignored", []{
+        const char* formats[] = { "rggb12", "bggr12" };
+        for( size_t f = 0; f < sizeof(formats) / sizeof(formats[0]); ++f )
+        {
+            check_left_justified_matches( formats[f], 12, g_cli_W, g_cli_H, "lj_junk.GPR", true,  /*junk=*/true, "" );
+            check_left_justified_matches( formats[f], 12, g_cli_W, g_cli_H, "lj_junk.DNG", false, /*junk=*/true, "" );
+        }
+    });
+
+    // A black level sends GPR output through the SDK's black-level subtraction, which then takes
+    // the shift, and the encoder gets right-justified samples.
+    run_case( "--input_left_justified with a black level: shifted in the black-level pass", []{
+        const std::string json = scratch_path( "lj_black.json" );
+        check( write_raw_metadata( json, g_cli_W, g_cli_H, PIXEL_FORMAT_RGGB_12, 180, 4095 ), "metadata written" );
+
+        check_left_justified_matches( "rggb12", 12, g_cli_W, g_cli_H, "lj_black.GPR", true,  /*junk=*/true, json.c_str() );
+        check_left_justified_matches( "rggb12", 12, g_cli_W, g_cli_H, "lj_black.DNG", false, /*junk=*/true, json.c_str() );
+        std::remove( json.c_str() );
+    });
+
+    run_case( "--input_left_justified with a GPR input fails, no output", []{
+        const std::string out = scratch_path( "lj_gpr.DNG" );
+        dng_convert_params p = preview_cli_params( g_cli_sample.c_str(), out.c_str(), "" );
+        p.input_left_justified = true;
+        check( dng_convert_main( &p ) != 0, "conversion reports failure" );
+        check_no_output( out );
+    });
+
+    run_case( "--input_left_justified with a packed pixel format fails, no output", []{
+        const std::string in  = scratch_path( "lj_packed.RAW" );
+        const std::string out = scratch_path( "lj_packed.GPR" );
+        check( save_raw( in, synthetic_raw( g_cli_W, g_cli_H, 12, 4 ) ), "input written" );
+
+        dng_convert_params p = raw_cli_params( in.c_str(), out.c_str(), g_cli_W, g_cli_H, "rggb12p", true );
+        check( dng_convert_main( &p ) != 0, "conversion reports failure" );
+        check_no_output( out );
+        std::remove( in.c_str() );
+    });
+}
+
+// ---------------------------------------------------------------------------
 // gpr_tools --quality (dng_convert_main)
 //
 // Selects the VC-5 quantizer table used whenever the image is encoded to GPR.
@@ -2014,6 +2202,8 @@ int main( int argc, char* argv[] )
     run_preview_cli_tests( std::string(data_dir) + "/Hero6/GOPR0024.GPR" );
 
     run_lens_correction_cli_tests( data_dir );
+
+    run_left_justified_cli_tests();
 
     run_quality_cli_tests();
 
