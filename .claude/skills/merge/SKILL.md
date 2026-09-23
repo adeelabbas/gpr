@@ -77,10 +77,13 @@ so the button is what tells them apart:
 - gpraw/gpr squash-merges (`Squash-merging #NN ...`), with GitHub's default
   message: the title with (#NN) and every commit's message.
 
-A squash merge by hand in adeelabbas/gpr can turn the button, and so the
-script, to squashing there; turning squash merging off in its settings
-pins the rebase, and is the user's call. So a `Squash-merging` line in
-adeelabbas/gpr is worth pointing out.
+The button's answer is per user: a merge by hand with the other method can
+turn it, and so the script, in either repository, and another operator's
+button can differ. The merge line says where the method came from. So a
+`Squash-merging` line in adeelabbas/gpr, or a `Rebase-merging` line in
+gpraw/gpr, is worth pointing out, and in a dry run worth stopping on.
+Turning the other method off in a repository's settings pins it, and is
+the user's call.
 
 Only once GitHub reports the PR merged does it retarget the stacked PRs to
 the default branch (`Retargeting #NN ...`), delete the branch on origin,

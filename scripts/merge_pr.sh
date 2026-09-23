@@ -181,11 +181,15 @@ DEFAULT="$(jq -r .defaultBranchRef.name <<<"$REPO_JSON")"
 SQUASH_OK="$(jq -r .squashMergeAllowed <<<"$REPO_JSON")"
 REBASE_OK="$(jq -r .rebaseMergeAllowed <<<"$REPO_JSON")"
 METHOD=""
+# Said with the merge, so a dry run shows where the method came from: the
+# button's answer is the gh user's, and can differ between two operators.
+METHOD_WHY="the merge button's method for this gh user here"
 case "$(jq -r .viewerDefaultMergeMethod <<<"$REPO_JSON")" in
     SQUASH) [ "$SQUASH_OK" = true ] && METHOD=squash ;;
     REBASE) [ "$REBASE_OK" = true ] && METHOD=rebase ;;
 esac
 if [ -z "$METHOD" ]; then
+    METHOD_WHY="the button offers neither a squash nor a rebase merge the settings allow"
     if [ "$SQUASH_OK" = true ]; then
         METHOD=squash
     elif [ "$REBASE_OK" = true ]; then
@@ -336,9 +340,9 @@ fi
 
 if [ "$STATE" = "OPEN" ]; then
     if [ "$METHOD" = squash ]; then
-        note "Squash-merging #$NUMBER at ${HEAD_SHA:0:7}"
+        note "Squash-merging #$NUMBER at ${HEAD_SHA:0:7} ($METHOD_WHY)"
     else
-        note "Rebase-merging #$NUMBER at ${HEAD_SHA:0:7}"
+        note "Rebase-merging #$NUMBER at ${HEAD_SHA:0:7} ($METHOD_WHY)"
     fi
     act gh pr merge "$NUMBER" "--$METHOD" --match-head-commit "$HEAD_SHA" \
         || fail "GitHub refused the merge; nothing was deleted"
