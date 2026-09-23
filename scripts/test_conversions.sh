@@ -55,7 +55,7 @@ ExecuteCommand()
 
 # iPhone DNGs: convert to GPR both directly and via a RAW round-trip, then
 # decode the round-tripped GPR back out to DNG/PPM/JPG. Apple encodes in BGGR
-# format - when we shift by one column, it becomes GRBG.
+# format - when we shift by one column, it becomes GBRG.
 RunIphonePipeline()
 {
     local SOURCE="$1" OUT_DIR="$2" NAME="$3"
