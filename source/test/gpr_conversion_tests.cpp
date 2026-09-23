@@ -1708,8 +1708,7 @@ static void run_lens_correction_cli_tests( const std::string& data_dir )
 
 // A w x h frame of `bits`-bit samples from a fixed formula, moved up by `shift` bits. With
 // `junk`, the `shift` bits below each sample are filled from a second formula as well. The
-// samples are a ramp with a small texture on top, which compresses like an image: a frame of
-// noise can outgrow the encoder's output buffer, fixed at half the raw size.
+// samples are a ramp with a small texture on top, which compresses like an image.
 static std::vector<uint16_t> synthetic_raw( unsigned int w, unsigned int h, unsigned int bits, unsigned int shift, bool junk = false )
 {
     const size_t   count = (size_t)w * h;
