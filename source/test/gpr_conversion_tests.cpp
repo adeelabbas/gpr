@@ -2083,6 +2083,42 @@ static void run_raw_input_cli_tests()
                    "decoded samples fill the range the white level declares" );
         });
     }
+
+    // A GBRG GPR at 16383, as gpr_tools used to write from a RAW and --apply_metadata still
+    // can: no pixel format describes it, so the parse must fail cleanly (it asserted), and
+    // gpr_check_vc5, which decodes without parsing, must stay inside the decoder's 14-bit
+    // GBRG output (it was sized as zero bytes: SIGSEGV on Linux, SIGBUS on macOS).
+    run_case( "--apply_metadata with WhiteLevel 16383, gbrg12: the GPR is rejected on read, decoded in bounds", []{
+        const std::string raw  = scratch_path( "gbrg16383.RAW" );
+        const std::string json = scratch_path( "gbrg16383.JSON" );
+        const std::string gpr  = scratch_path( "gbrg16383.GPR" );
+        check( save_raw( raw, synthetic_raw( g_cli_W, g_cli_H, 12, 0 ) ), "raw frame written" );
+        check( write_raw_metadata( json, g_cli_W, g_cli_H, PIXEL_FORMAT_GBRG_12, 0, 16383 ), "metadata written" );
+
+        dng_convert_params p = raw_cli_params( raw.c_str(), gpr.c_str(), g_cli_W, g_cli_H, "gbrg12", false );
+        p.metadata_file_path = json.c_str();
+        check( dng_convert_main( &p ) == 0, "raw -> gpr succeeds" );
+        std::remove( raw.c_str() );
+        std::remove( json.c_str() );
+
+        Buffer o;
+        const bool loaded = load_file( gpr.c_str(), o );
+        check( loaded, "gpr written" );
+        if( !loaded ) return;
+
+        unsigned int w = 0, h = 0;
+        check( !parse_dims( o.b, w, h ), "metadata parse rejects it" );
+        check( tiff_has_vc5_compression( o.b ), "vc5 compression flag set (TIFF tag)" );
+
+        gpr_buffer tmp = o.b;
+        check( gpr_check_vc5( &g_alloc, &tmp ), "vc5 compression flag set (gpr_check_vc5)" );
+
+        const std::string dng = scratch_path( "gbrg16383.DNG" );
+        dng_convert_params pd = preview_cli_params( gpr.c_str(), dng.c_str(), "" );
+        check( dng_convert_main( &pd ) != 0, "gpr -> dng reports failure" );
+        check_no_output( dng );
+        std::remove( gpr.c_str() );
+    });
 }
 
 // ---------------------------------------------------------------------------
