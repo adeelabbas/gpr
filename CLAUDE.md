@@ -53,9 +53,12 @@ has to be carried across so the three do not drift. The rules:
   cherry-pick the code commits onto a scratch branch of a local `gpraw/gpr`
   clone, build, run its suite, and say so in the PR body. The tracked files
   under `.claude/`, with `scripts/review_pr.sh` and `scripts/merge_pr.sh`,
-  are shared byte for byte with `gpraw/gpr`, and a change to them follows
-  this rule too: here first, then the same cherry-pick, never an edit made
-  there alone.
+  are shared byte for byte with `gpraw/gpr`: a change to them is made in
+  both repositories in the same bytes, from whichever side it starts, so
+  that it cherry-picks cleanly either way. An edit made in one alone makes
+  the two drift. They state neither repository's CI details (job names,
+  runners, branch protection), which are read at run time, so a CI change
+  in one repository does not touch them.
 - **Borrow from downstream.** Patterns that already exist in `gpraw/gpr` and
   apply to GPR file writing (encoder features, DNG metadata handling, writer
   robustness, test cases, review findings) belong here as well. Port them
@@ -188,7 +191,7 @@ routines name them only to say what happens where they exist.
   `--post` posts the report as one standing comment
   (`<!-- gpr-dual-review -->`), edited in place by a later run, with every
   full review collapsed below it, and `GPR_REVIEW_NO_POST=1` makes it a
-  rehearsal that changes nothing on GitHub or in the review's files. The `needs-coverage` label it
+  rehearsal that changes nothing on GitHub. The `needs-coverage` label it
   settles in `gpraw/gpr` starts `claude-test-gap-check.yml`, which this
   repository does not have: the script finds no such workflow on the base
   branch, leaves the label alone, and its `label:` line says there is no
