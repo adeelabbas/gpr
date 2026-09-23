@@ -19,7 +19,7 @@ static gpr_unsigned_rational unsigned_rational_construct(int32_t numerator, int3
     return a;
 }
 
-gpr_date_and_time construct_dng_date_and_time (uint32_t year, uint32_t month, uint32_t day, uint32_t hour, uint32_t minute, uint32_t second)
+gpr_date_and_time construct_gpr_date_and_time (uint32_t year, uint32_t month, uint32_t day, uint32_t hour, uint32_t minute, uint32_t second)
 {
     gpr_date_and_time x;
     x.year     = year;
@@ -83,7 +83,7 @@ void gpr_exif_info_set_defaults( gpr_exif_info* x )
     
     x->iso_speed_rating = 232;
     
-    x->date_time_original = construct_dng_date_and_time (2016, 03, 25, 15, 55, 23 );
+    x->date_time_original = construct_gpr_date_and_time (2016, 03, 25, 15, 55, 23 );
     
     x->date_time_digitized = x->date_time_original;
     
