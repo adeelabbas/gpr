@@ -80,10 +80,10 @@ number their CLAUDE.md sections differently.
 - `git fetch origin <default>`, typed exactly as `git fetch origin master`
   or `git fetch origin main`, which is what the pre-approval matches. Then
   `git merge-base --is-ancestor origin/<default> HEAD`: when it fails the
-  branch is behind the default branch. Where the default branch requires
-  branches to be up to date (gpraw/gpr's `main`), GitHub reports `BEHIND`
-  and `/merge` refuses; where it does not (adeelabbas/gpr's `master` has no
-  branch protection), the merge would go through on a tree CI never built.
+  branch is behind the default branch. Where branch protection requires
+  branches to be up to date, GitHub reports `BEHIND` and `/merge` refuses;
+  where it does not, the merge would go through on a tree CI never built.
+  Which it is, the PR's `mergeStateStatus` below says.
 - `git worktree list`: other sessions' worktrees live under
   `.claude/worktrees/`. Another checkout on the same branch, or files
   changing that this session never touched, means another session is
@@ -95,26 +95,23 @@ number their CLAUDE.md sections differently.
     gh pr view --json number,title,url,state,isDraft,baseRefName,headRefOid,mergeable,mergeStateStatus,statusCheckRollup,labels,files,comments,body
 
 - **CI**: the gate is `.github/workflows/build-flags.yml`, the flag
-  matrix: every check whose `workflowName` is `Build flag matrix`. Today
-  that is `build-flags (ubuntu-latest)` and `build-flags (macos-latest)` in
-  adeelabbas/gpr, `build-flags-x86` and `build-flags-arm64` in gpraw/gpr.
-  `gh pr checks <n> --required` names the ones branch protection requires
-  (`build-flags-arm64` in gpraw/gpr, none in adeelabbas/gpr); it exits
-  non-zero when there are none, when one failed, and while one is pending,
-  so read what it prints. `/merge` merges only on `CLEAN` (or
-  `HAS_HOOKS`): a required check that failed or is still pending makes it
-  `BLOCKED`, and any other check that has not passed makes it `UNSTABLE`. For a failure,
+  matrix: every check in `statusCheckRollup` whose `workflowName` is that
+  workflow's `name:`. The job names differ between the two repositories,
+  so read them there rather than expecting any. `gh pr checks <n>
+  --required` names the ones branch protection requires; it exits non-zero
+  when there are none, when one failed, and while one is pending, so read
+  what it prints. `/merge` merges only on `CLEAN` (or `HAS_HOOKS`): a
+  required check that failed or is still pending makes it `BLOCKED`, and
+  any other check that has not passed makes it `UNSTABLE`. For a failure,
   `gh run view <id> --log-failed` shows why; read it before recommending a
   fix.
-- **A matrix that never starts**: it runs only on the paths it watches (C
-  and C++ sources and headers, a `CMakeLists.txt`,
-  `scripts/test_build_flags.sh`, and `build-flags.yml` itself - every
-  workflow, in gpraw/gpr), since nothing else can break a flag
-  configuration. Where no check is required, a PR that touches none of
-  them has no matrix check at all, and that is neither a failure nor a
-  wait. Where one is required, such a PR never gets it and sits `BLOCKED`
-  for good - `build-flags.yml`'s comment on its paths tells how gpraw/gpr#39
-  did - so that is a decision for the operator, not something to wait out.
+- **A matrix that never starts**: it runs only on the paths its `paths:`
+  list watches, since nothing else can break a flag configuration. Where
+  no check is required, a PR that touches none of them has no matrix check
+  at all, and that is neither a failure nor a wait. Where one is required,
+  such a PR never gets it and sits `BLOCKED` for good - the workflow's
+  comment on its paths says what that took before - so that is a decision
+  for the operator, not something to wait out.
 - **Divergence**: when `headRefOid` is not this checkout's commit, the two
   have moved apart. A head ahead of the checkout, typically a case the
   test-gap pass committed, means pulling it (`git pull --ff-only`) is the
@@ -159,10 +156,9 @@ number their CLAUDE.md sections differently.
 
 - PRs stacked on this branch (base is this branch) land after it; `/merge`
   retargets them to the default branch once this one is in.
-- Where the default branch is strict (gpraw/gpr's `main` requires
-  `build-flags-arm64` on an up-to-date branch, and that leg is one
-  self-hosted runner), several ready PRs land one at a time, each catching
-  up to `main` and rerunning the matrix before its merge.
+- Where branch protection requires up-to-date branches (a `BEHIND` above
+  says so), several ready PRs land one at a time, each catching up to the
+  default branch and rerunning the matrix before its merge.
 
 **Keeping the repositories in sync**
 

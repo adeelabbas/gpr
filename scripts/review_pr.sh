@@ -459,6 +459,7 @@ CODE="$INPUT/code"
 remove_checkouts() {
     git worktree remove --force "$CODE" >/dev/null 2>&1
     git worktree prune >/dev/null 2>&1
+    git update-ref -d "refs/review/pr-$N" >/dev/null 2>&1
 }
 
 # --- --post ----------------------------------------------------------------------------
@@ -610,10 +611,10 @@ def clip(text, room):
     return text[:keep] + f"\n\n[... {len(text) - keep} more characters not shown]"
 
 # GitHub refuses a comment body over 65536 characters, and refuses it only at
-# the post, after both reviewers have run. So the body is fitted here, under a
+# the post, after every reviewer has run. So the body is fitted here, under a
 # margin. The summary is cut only when it would not fit on its own, leaving
 # each full review RESERVE for its wrapper and its notice. The reviews then
-# take the rest in turn, so room one does not use passes to the other.
+# take the rest in turn, so room one does not use passes to the next.
 LIMIT = 65000
 RESERVE = 300
 body = "\n".join(head) + "\n"
@@ -747,6 +748,11 @@ RECONCILE_TIMEOUT_S="$(timeout_seconds "$RECONCILE_TIMEOUT" GPR_REVIEW_RECONCILE
 (( RECONCILE_TIMEOUT_S > 0 )) || fail "GPR_REVIEW_RECONCILE_TIMEOUT must be more than zero."
 [[ -r "$RECONCILER_BRIEF" ]] || fail "there is no reconciler brief at $RECONCILER_BRIEF."
 
+# What makes a Claude run read-only, for the reviewers and the reconciler
+# alike: run_claude, below, says why each flag is there. One list, so the
+# boundary cannot differ between the two.
+CLAUDE_READ_ONLY=(--restricted --strict-mcp-config --tools Read,Grep,Glob --permission-mode dontAsk)
+
 # --- the reconciler ------------------------------------------------------------------------
 # One headless run over the reviews that finished, under the Claude reviewer's
 # read-only flags (run_claude, below, says why each is there). It starts in
@@ -758,7 +764,7 @@ run_reconciler() {
     local model="$1" tag="$2"
     (cd "$WORK" && perl -e 'alarm shift; exec @ARGV or die "exec: $!\n"' "$RECONCILE_TIMEOUT_S" \
          "$CLAUDE" -p --model "$model" --effort "$RECONCILE_EFFORT" \
-         --restricted --strict-mcp-config --tools Read,Grep,Glob --permission-mode dontAsk \
+         "${CLAUDE_READ_ONLY[@]}" \
          --max-turns 60 --no-session-persistence \
          --output-format stream-json --verbose < "$WORK/reconcile-prompt.md") \
         > "$WORK/reconcile-$tag-stream.jsonl" 2> "$WORK/reconcile-$tag-stderr.log"
@@ -830,7 +836,9 @@ problems = []
 if slurp(f"reconcile-{tag}-exit").strip() == "142":
     problems.append(f"it was stopped at its {limit} time limit (GPR_REVIEW_RECONCILE_TIMEOUT)")
 elif result.get("subtype") != "success" or result.get("is_error"):
-    err = slurp(f"reconcile-{tag}-stderr.log").strip().splitlines()[-1:] or [""]
+    # The CLI's own error first, as the reviewers' check reads it.
+    err = (result.get("result") or "").strip().splitlines()[-1:] if result.get("is_error") else []
+    err = err or slurp(f"reconcile-{tag}-stderr.log").strip().splitlines()[-1:] or [""]
     problems.append(f"the run ended {result.get('subtype') or 'without a result'} {err[0][:200]}".rstrip())
 if model.startswith("claude-") and not ran_on.startswith(model):
     problems.append(f"it ran on {ran_on}, not {model}")
@@ -930,8 +938,19 @@ done
 
 BASE="$(field baseRefName)"
 git fetch --quiet origin "refs/heads/$BASE" || fail "could not fetch $BASE from origin."
-git fetch --quiet origin "refs/pull/$N/head" || fail "could not fetch the head of #$N from origin."
-HEAD_SHA="$(git rev-parse FETCH_HEAD)"
+# Into a ref of this PR's own, not FETCH_HEAD: that file is one per
+# checkout, so two reviews started together from one checkout read each
+# other's fetch. #41 and #42 of gpraw/gpr did, on 2026-09-23: one run found
+# FETCH_HEAD mid-write and stopped, and it could as well have reviewed the
+# other PR's head (measured on a scratch pair: the old read took the
+# other PR's head in 10 rounds of 10, this one in none of 10).
+# remove_checkouts drops the ref, at the start of a full run as well as at
+# --post: a commit just fetched outlives its ref by gc's two-week grace,
+# and the checkout's HEAD holds it from the worktree add on.
+git fetch --quiet origin "+refs/pull/$N/head:refs/review/pr-$N" ||
+    fail "could not fetch the head of #$N from origin."
+HEAD_SHA="$(git rev-parse --verify -q "refs/review/pr-$N^{commit}")" ||
+    fail "could not read the head of #$N that was just fetched."
 MB="$(git merge-base "origin/$BASE" "$HEAD_SHA")" ||
     fail "#$N's head $HEAD_SHA shares no history with origin/$BASE."
 
@@ -1093,7 +1112,7 @@ run_claude() {
     local slug="$1" model="$2"
     (cd "$INPUT" && perl -e 'alarm shift; exec @ARGV or die "exec: $!\n"' "$CLAUDE_TIMEOUT_S" \
          "$CLAUDE" -p --model "$model" --effort "$CLAUDE_EFFORT" \
-         --restricted --strict-mcp-config --tools Read,Grep,Glob --permission-mode dontAsk \
+         "${CLAUDE_READ_ONLY[@]}" \
          --max-turns 80 --no-session-persistence \
          --output-format stream-json --verbose < "$WORK/prompt.md") \
         > "$WORK/$slug-stream.jsonl" 2> "$WORK/$slug-stderr.log"
