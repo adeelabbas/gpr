@@ -1693,8 +1693,7 @@ static void run_lens_correction_cli_tests( const std::string& data_dir )
 
 // A w x h frame of `bits`-bit samples from a fixed formula, moved up by `shift` bits. With
 // `junk`, the `shift` bits below each sample are filled from a second formula as well. The
-// samples are a ramp with a small texture on top, which compresses like an image: a frame of
-// noise can outgrow the encoder's output buffer, fixed at half the raw size.
+// samples are a ramp with a small texture on top, which compresses like an image.
 static std::vector<uint16_t> synthetic_raw( unsigned int w, unsigned int h, unsigned int bits, unsigned int shift, bool junk = false )
 {
     const size_t   count = (size_t)w * h;
@@ -2118,6 +2117,57 @@ static void run_raw_input_cli_tests()
         check( dng_convert_main( &pd ) != 0, "gpr -> dng reports failure" );
         check_no_output( dng );
         std::remove( gpr.c_str() );
+    });
+
+    // The encoder's output buffer used to be half the input's size: 8 bits a pixel for an
+    // unpacked frame, 6 for a packed one, and the highpass coder writes straight into it. Noise
+    // at Filmscan-X codes to about 10 bits a pixel, so both overran the heap (packed input
+    // segfaulted). The packed frame must encode exactly like its unpacked twin, and both
+    // outputs must be larger than the old buffer, or the case no longer covers the overflow.
+    run_case( "--input_pixel_format=<12-bit mosaic>p on a RAW input: a frame of noise encodes like its unpacked twin", []{
+        const unsigned int w = 384, h = 256;
+        std::vector<uint16_t> px( (size_t)w * h );
+        for( size_t i = 0; i < px.size(); i++ )
+            px[i] = (uint16_t)( ( ( i * 2654435761u ) >> 7 ) & 0xFFF );
+
+        // Two samples in three bytes, as the encoder's 12P unpacking reads them.
+        std::vector<unsigned char> packed;
+        for( size_t i = 0; i < px.size(); i += 2 )
+        {
+            packed.push_back( (unsigned char)( px[i] & 0xFF ) );
+            packed.push_back( (unsigned char)( ( ( px[i + 1] & 0xF ) << 4 ) | ( px[i] >> 8 ) ) );
+            packed.push_back( (unsigned char)( px[i + 1] >> 4 ) );
+        }
+
+        const std::string raw_u = scratch_path( "noise_u.RAW" );
+        const std::string raw_p = scratch_path( "noise_p.RAW" );
+        check( save_raw( raw_u, px ), "unpacked input written" );
+        check( save_file( raw_p.c_str(), &packed[0], packed.size() ), "packed input written" );
+
+        const char* formats[][2] = { { "rggb12", "rggb12p" }, { "gbrg12", "gbrg12p" } };
+        for( size_t f = 0; f < sizeof(formats) / sizeof(formats[0]); ++f )
+        {
+            const std::string out_u = scratch_path( "noise_u.GPR" );
+            const std::string out_p = scratch_path( "noise_p.GPR" );
+            dng_convert_params pu = raw_cli_params( raw_u.c_str(), out_u.c_str(), w, h, formats[f][0], false );
+            dng_convert_params pp = raw_cli_params( raw_p.c_str(), out_p.c_str(), w, h, formats[f][1], false );
+            check( dng_convert_main( &pu ) == 0, "unpacked raw -> gpr succeeds" );
+            check( dng_convert_main( &pp ) == 0, "packed raw -> gpr succeeds" );
+
+            Buffer u, q;
+            const bool loaded = load_file( out_u.c_str(), u ) && load_file( out_p.c_str(), q );
+            std::remove( out_u.c_str() );
+            std::remove( out_p.c_str() );
+            check( loaded, "outputs written" );
+            if( !loaded ) continue;
+
+            validate_dng_like( q, w, h, /*vc5=*/true );
+            check( u.b.size > (size_t)w * h && q.b.size > (size_t)w * h, "outputs larger than the old half-frame buffer" );
+            check( q.b.size == u.b.size && std::memcmp( q.b.buffer, u.b.buffer, q.b.size ) == 0,
+                   "packed output byte-identical to the unpacked one" );
+        }
+        std::remove( raw_u.c_str() );
+        std::remove( raw_p.c_str() );
     });
 }
 

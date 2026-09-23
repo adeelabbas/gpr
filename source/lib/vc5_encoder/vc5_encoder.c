@@ -47,8 +47,16 @@ CODEC_ERROR vc5_encoder_process(const vc5_encoder_parameters*   encoding_paramet
     
     STREAM bitstream_file;
     
-    // It is assumed that vc5 will always encode at 2:1 compression ratio, compared to raw buffer
-    const int max_vc5_buffer_size = raw_buffer->size / 2;
+    // Size the output for the worst case, which is bounded: no coefficient codes to more than
+    // 27 bits (the longest magnitude codeword in table17 is 26 bits, plus the sign; a zero costs
+    // at most one bit and a lowpass coefficient 16), and the bands of the four W/2 x H/2
+    // channels hold at most (W + 8) * (H + 8) coefficients once every wavelet level rounds odd
+    // dimensions up. 64 KB covers the headers, band-end codewords and flushes. A ratio to the
+    // input size is no bound: noise at Filmscan-X outgrows half an unpacked frame, half a packed
+    // one (6 bits a pixel) overflows on ordinary content, and the highpass coder writes straight
+    // into this buffer. Pages that are never written are never touched.
+    const size_t max_vc5_buffer_size = (size_t)( encoding_parameters->input_width  + 8 ) *
+                                       (size_t)( encoding_parameters->input_height + 8 ) * 27 / 8 + 65536;
 
     // Initialize the data structure for passing parameters to the encoder
     InitEncoderParameters(&parameters);
@@ -162,6 +170,9 @@ CODEC_ERROR vc5_encoder_process(const vc5_encoder_parameters*   encoding_paramet
 #endif
     
     vc5_buffer->buffer = encoding_parameters->mem_alloc( max_vc5_buffer_size );
+    if (vc5_buffer->buffer == NULL) {
+        return CODEC_ERROR_OUTOFMEMORY;
+    }
     
     // Open a stream to the output file
     error = CreateStreamBuffer(&bitstream_file, vc5_buffer->buffer, max_vc5_buffer_size );
