@@ -49,6 +49,7 @@ public:
     string  input_pixel_format;
     int     input_skip_rows;
     int     input_skip_cols;
+    bool    input_left_justified;
 
     string  output_path;
 
@@ -98,6 +99,7 @@ public:
                                                                             "Choices: rggb12, rggb12p, [rggb14], gbrg12, gbrg12p, bggr12, bggr14 \n")
         ("input_skip_rows",         input_skip_rows,      0,                "Input image rows to skip (shifts Bayer phase, e.g. BGGR->GRBG)")
         ("input_skip_cols",         input_skip_cols,      0,                "Input image columns to skip (shifts Bayer phase, e.g. BGGR->GBRG)")
+        ("input_left_justified",    input_left_justified, false,            "RAW samples are left-justified in 16-bit words (e.g. 12-bit data with the low 4 bits zero)")
 
         ("output_path,o",           output_path,          string(""),       "Output file path.\n"
                                                                             "File choices: GPR, DNG, PPM, RAW, JPG")
@@ -170,7 +172,7 @@ int main(int argc, char *argv [])
     {
         printf("\n");
         printf("Following parameters override metadata when set and are only used when the input format is RAW: \n");
-        printf("    input_width, input_height, input_pitch, input_pixel_format, input_skip_rows and input_skip_cols \n");
+        printf("    input_width, input_height, input_pitch, input_pixel_format, input_skip_rows, input_skip_cols and input_left_justified \n");
         printf("\n");
         printf("\n");
         printf("-- Example Commnads (please see scripts/test_conversions.sh for more examples) --\n");
@@ -220,6 +222,7 @@ int main(int argc, char *argv [])
         convert_params.input_skip_rows         = args.input_skip_rows;
         convert_params.input_skip_cols         = args.input_skip_cols;
         convert_params.input_pixel_format      = args.input_pixel_format.c_str();
+        convert_params.input_left_justified    = args.input_left_justified;
         convert_params.output_file_path        = args.output_path.c_str();
         convert_params.output_format           = args.output_format.c_str();
         convert_params.quality                 = args.quality.c_str();

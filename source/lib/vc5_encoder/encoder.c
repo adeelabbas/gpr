@@ -766,6 +766,8 @@ CODEC_ERROR ImageUnpackingProcess(const PACKED_IMAGE *input,
     case PIXEL_FORMAT_RAW_BGGR_12:
     case PIXEL_FORMAT_RAW_BGGR_14:
     case PIXEL_FORMAT_RAW_RGGB_16:
+    case PIXEL_FORMAT_RAW_GBRG_16:
+    case PIXEL_FORMAT_RAW_BGGR_16:
         channel_count = 4;
         max_channel_width = input->width / 2;
         max_channel_height = input->height / 2;
@@ -812,6 +814,18 @@ CODEC_ERROR ImageUnpackingProcess(const PACKED_IMAGE *input,
 
         case PIXEL_FORMAT_RAW_GBRG_12P:
             UnpackImage_12P(input, output, enabled_parts, BAYER_ORDERING_GBRG );
+            break;
+
+        case PIXEL_FORMAT_RAW_RGGB_16:
+            UnpackImage_16(input, output, enabled_parts, BAYER_ORDERING_RGGB );
+            break;
+
+        case PIXEL_FORMAT_RAW_GBRG_16:
+            UnpackImage_16(input, output, enabled_parts, BAYER_ORDERING_GBRG );
+            break;
+
+        case PIXEL_FORMAT_RAW_BGGR_16:
+            UnpackImage_16(input, output, enabled_parts, BAYER_ORDERING_BGGR );
             break;
 
         default:

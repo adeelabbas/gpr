@@ -49,6 +49,12 @@
 
         VC5_ENCODER_PIXEL_FORMAT_BGGR_14 = 6,           // BGGR 14bit pixels packed into 16bits
 
+        VC5_ENCODER_PIXEL_FORMAT_RGGB_16 = 7,           // RGGB pixels in the top bits of 16bits (left-justified 12 or 14bit)
+
+        VC5_ENCODER_PIXEL_FORMAT_GBRG_16 = 8,           // GBRG pixels in the top bits of 16bits (left-justified 12 or 14bit)
+
+        VC5_ENCODER_PIXEL_FORMAT_BGGR_16 = 9,           // BGGR pixels in the top bits of 16bits (left-justified 12 or 14bit)
+
         VC5_ENCODER_PIXEL_FORMAT_DEFAULT = VC5_ENCODER_PIXEL_FORMAT_RGGB_14,
         
     } VC5_ENCODER_PIXEL_FORMAT;

@@ -37,6 +37,8 @@ extern "C" {
 
     void UnpackImage_12P(const PACKED_IMAGE *input, UNPACKED_IMAGE *output, ENABLED_PARTS enabled_parts, BAYER_ORDERING bayer_ordering );
 
+    void UnpackImage_16(const PACKED_IMAGE *input, UNPACKED_IMAGE *output, ENABLED_PARTS enabled_parts, BAYER_ORDERING bayer_ordering );
+
 #ifdef __cplusplus
 }
 #endif

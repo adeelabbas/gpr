@@ -73,3 +73,24 @@ void CopyBufferToRawImage( const gpr_buffer_auto& buffer, size_t stride, dng_ima
     
     raw_image.Put(pixel_buffer);
 }
+
+void CopyLeftJustifiedBufferToRawImage( const gpr_buffer_auto& buffer, size_t stride, unsigned int shift, dng_simple_image& raw_image )
+{
+    dng_pixel_buffer pixel_buffer;
+
+    raw_image.GetPixelBuffer( pixel_buffer );
+
+    const dng_point size = raw_image.Bounds().Size();
+
+    const uint16* input_row = (const uint16*)buffer.get_buffer();
+
+    for( int32 row = 0; row < size.v; row++, input_row += stride )
+    {
+        uint16* output_row = pixel_buffer.DirtyPixel_uint16( row, 0 );
+
+        for( int32 col = 0; col < size.h; col++ )
+        {
+            output_row[col] = (uint16)( input_row[col] >> shift );
+        }
+    }
+}
