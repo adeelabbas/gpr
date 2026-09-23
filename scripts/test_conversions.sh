@@ -12,9 +12,9 @@
 #   ./scripts/test_conversions.sh ./data/samples
 #
 # Output is written to ./out/<name>/ under the current directory (override with
-# OUT_ROOT=/path). The JPEG embedded by the --preview steps is decoded from the
-# first GPR found (a 16:1 render) unless PREVIEW_FILE=/path names one. Override
-# the gpr_tools binary with GPR_TOOLS=/path.
+# OUT_ROOT=/path). The --preview steps embed the JPEG named by PREVIEW_FILE=/path
+# and are skipped when it is not set. Override the gpr_tools binary with
+# GPR_TOOLS=/path.
 
 set -euo pipefail
 
@@ -66,11 +66,13 @@ RunIphonePipeline()
     # Same, but written with a .DNG extension (--output_format=gpr forces GPR encoding)
     ExecuteCommand "\"$GPR_TOOLS\" -i \"$SOURCE\" -o \"$OUT_DIR/GPR_FROM_DNG.DNG\" --output_format=gpr --input_skip_cols=1 --input_pixel_format=gbrg12"
 
-    # DNG -> GPR with external preview
-    ExecuteCommand "\"$GPR_TOOLS\" -i \"$SOURCE\" -o \"$OUT_DIR/GPR_FROM_DNG_WITH_PREVIEW.GPR\" --input_skip_cols=1 --input_pixel_format=gbrg12 --preview=\"$PREVIEW\""
+    if [ -n "$PREVIEW" ]; then
+        # DNG -> GPR with external preview
+        ExecuteCommand "\"$GPR_TOOLS\" -i \"$SOURCE\" -o \"$OUT_DIR/GPR_FROM_DNG_WITH_PREVIEW.GPR\" --input_skip_cols=1 --input_pixel_format=gbrg12 --preview=\"$PREVIEW\""
 
-    # DNG -> GPR with external preview, written with a .DNG extension
-    ExecuteCommand "\"$GPR_TOOLS\" -i \"$SOURCE\" -o \"$OUT_DIR/GPR_FROM_DNG_WITH_PREVIEW.DNG\" --output_format=gpr --input_skip_cols=1 --input_pixel_format=gbrg12 --preview=\"$PREVIEW\""
+        # DNG -> GPR with external preview, written with a .DNG extension
+        ExecuteCommand "\"$GPR_TOOLS\" -i \"$SOURCE\" -o \"$OUT_DIR/GPR_FROM_DNG_WITH_PREVIEW.DNG\" --output_format=gpr --input_skip_cols=1 --input_pixel_format=gbrg12 --preview=\"$PREVIEW\""
+    fi
 
     # DNG -> RAW (also dumps metadata, needed to re-interpret the raw bytes below)
     ExecuteCommand "\"$GPR_TOOLS\" -i \"$SOURCE\" -o \"$OUT_DIR/RAW_FROM_DNG.RAW\" -d > \"$OUT_DIR/$NAME.JSON\""
@@ -103,7 +105,9 @@ RunGoproPipeline()
     ExecuteCommand "\"$GPR_TOOLS\" -i \"$SOURCE\" -o \"$OUT_DIR/GPR_FROM_GPR.GPR\"$COMMON_PARAMS"
 
     # GPR -> GPR with external preview
-    ExecuteCommand "\"$GPR_TOOLS\" -i \"$SOURCE\" -o \"$OUT_DIR/GPR_FROM_GPR_PREV.GPR\" --preview=\"$PREVIEW\"$COMMON_PARAMS"
+    if [ -n "$PREVIEW" ]; then
+        ExecuteCommand "\"$GPR_TOOLS\" -i \"$SOURCE\" -o \"$OUT_DIR/GPR_FROM_GPR_PREV.GPR\" --preview=\"$PREVIEW\"$COMMON_PARAMS"
+    fi
 
     # GPR -> DNG (also dumps metadata)
     ExecuteCommand "\"$GPR_TOOLS\" -i \"$SOURCE\" -o \"$OUT_DIR/DNG_FROM_GPR.DNG\" -d$COMMON_PARAMS > \"$OUT_DIR/$NAME.JSON\""
@@ -145,21 +149,12 @@ while IFS= read -r f; do FILES+=("$f"); done < <(find "$INPUT_DIR" -type f \( -i
 rm -rf "$OUT_ROOT"
 mkdir -p "$OUT_ROOT"
 
-# The preview JPEG the --preview steps embed: decode one from the first GPR
-# unless the caller supplied a file.
+# The preview JPEG the --preview steps embed; without one they are skipped.
 PREVIEW="${PREVIEW_FILE:-}"
 if [ -z "$PREVIEW" ]; then
-    for SOURCE in "${FILES[@]}"; do
-        case "$(echo "${SOURCE##*.}" | tr '[:lower:]' '[:upper:]')" in
-            GPR)
-                PREVIEW="$OUT_ROOT/preview.jpg"
-                ExecuteCommand "\"$GPR_TOOLS\" -i \"$SOURCE\" -o \"$PREVIEW\" --rgb_resolution=16:1"
-                break ;;
-        esac
-    done
-fi
-if [ -z "$PREVIEW" ] || [ ! -f "$PREVIEW" ]; then
-    echo "error: no preview image: no GPR to decode one from (set PREVIEW_FILE=/path)" >&2
+    echo "note: PREVIEW_FILE not set, skipping the --preview steps"
+elif [ ! -f "$PREVIEW" ]; then
+    echo "error: PREVIEW_FILE is not a file: $PREVIEW" >&2
     exit 1
 fi
 
