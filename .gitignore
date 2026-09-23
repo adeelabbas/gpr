@@ -2,6 +2,11 @@
 build/
 scripts/*.pyc
 
+# Per-machine Claude Code approvals, and agent worktrees. Skills under
+# .claude/skills and .claude/settings.json are tracked.
+.claude/settings.local.json
+.claude/worktrees/
+
 # Prerequisites
 *.d
 
