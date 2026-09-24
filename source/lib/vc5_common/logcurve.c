@@ -20,7 +20,7 @@
 
 #include "common.h"
 
-uint16_t EncoderLogCurve[LOG_CURVE_TABLE_LENGTH];
+uint16_t EncoderLogCurve[ENCODER_LOG_CURVE_TABLE_LENGTH];
 
 uint16_t DecoderLogCurve[LOG_CURVE_TABLE_LENGTH];
 
@@ -53,6 +53,12 @@ void SetupEncoderLogCurve(void)
         float output = 4095.0 * (log10(input/max_input_val * 112.0 + 1.0)/log10(113));
 
         EncoderLogCurve[i]  = ( (uint16_t)output );
+    }
+
+    // Samples above the pixel format's range saturate at the top of the curve
+    for( ; i < ENCODER_LOG_CURVE_TABLE_LENGTH; i++ )
+    {
+        EncoderLogCurve[i]  = EncoderLogCurve[LOG_CURVE_TABLE_LENGTH - 1];
     }
 }
 

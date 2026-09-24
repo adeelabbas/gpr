@@ -2431,6 +2431,57 @@ static void run_raw_input_cli_tests()
         check_no_output( dng );
         std::remove( gpr.c_str() );
     });
+
+    // A frame whose samples sit in the top bits but is not flagged --input_left_justified runs up
+    // to 65520, far above the 12 or 14 bits the format names, and the encoder indexes its log
+    // curve with each sample (>> 2 for 14 bits). It must encode exactly as the same frame
+    // saturated at the format's maximum does: that frame is in range, so its GPR is the ground
+    // truth. RGGB takes the 8-wide unpack (NEON on arm64) and BGGR the per-pixel one.
+    run_case( "--input_pixel_format on a RAW input: samples above the format's range saturate", []{
+        const struct { const char* format; uint16_t max; } formats[] = {
+            { "rggb12", 4095 }, { "bggr12", 4095 }, { "rggb14", 16383 }, { "bggr14", 16383 },
+        };
+        const std::vector<uint16_t> frame = synthetic_raw( g_cli_W, g_cli_H, 12, 4 );
+
+        const std::string raw     = scratch_path( "oor.RAW" );
+        const std::string raw_sat = scratch_path( "oor_sat.RAW" );
+        const std::string gpr     = scratch_path( "oor.GPR" );
+        const std::string gpr_sat = scratch_path( "oor_sat.GPR" );
+        const std::string back    = scratch_path( "oor_back.RAW" );
+        check( save_raw( raw, frame ), "raw frame written" );
+
+        for( size_t f = 0; f < sizeof(formats) / sizeof(formats[0]); ++f )
+        {
+            std::vector<uint16_t> sat( frame );
+            for( size_t i = 0; i < sat.size(); ++i )
+                if( sat[i] > formats[f].max ) sat[i] = formats[f].max;
+            check( save_raw( raw_sat, sat ), "saturated frame written" );
+
+            dng_convert_params p  = raw_cli_params( raw.c_str(),     gpr.c_str(),     g_cli_W, g_cli_H, formats[f].format, false );
+            dng_convert_params ps = raw_cli_params( raw_sat.c_str(), gpr_sat.c_str(), g_cli_W, g_cli_H, formats[f].format, false );
+            check( dng_convert_main( &p ) == 0, "out-of-range frame encodes" );
+            check( dng_convert_main( &ps ) == 0, "saturated frame encodes" );
+
+            dng_convert_params pr = preview_cli_params( gpr.c_str(), back.c_str(), "" );
+            check( dng_convert_main( &pr ) == 0, "gpr -> raw succeeds" );
+
+            Buffer o, s, r;
+            const bool loaded = load_file( gpr.c_str(), o ) && load_file( gpr_sat.c_str(), s ) &&
+                                load_file( back.c_str(), r );
+            std::remove( gpr.c_str() );
+            std::remove( gpr_sat.c_str() );
+            std::remove( back.c_str() );
+            check( loaded, "outputs written" );
+            if( !loaded ) continue;
+
+            validate_dng_like( o, g_cli_W, g_cli_H, /*vc5=*/true );
+            check( o.b.size == s.b.size && std::memcmp( o.b.buffer, s.b.buffer, o.b.size ) == 0,
+                   "output byte-identical to the saturated frame's" );
+            validate_raw( r, g_cli_W, g_cli_H );
+        }
+        std::remove( raw.c_str() );
+        std::remove( raw_sat.c_str() );
+    });
 }
 
 // ---------------------------------------------------------------------------
