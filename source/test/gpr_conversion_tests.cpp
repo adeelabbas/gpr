@@ -2218,6 +2218,65 @@ static void run_raw_input_cli_tests()
         check_no_output( dng );
         std::remove( gpr.c_str() );
     });
+
+    // The VC-5 encoder's wavelet filters read six rows and columns of each level's input, and
+    // the third level's input is a quarter of a channel (half the frame), rounded up. Under
+    // 42 x 42 they read outside it, and a frame under 18 rows ran the transform past its
+    // wavelet: 2048 x 16 wrote over the heap (SIGSEGV on Linux, SIGBUS on macOS). The encoder
+    // refuses such a frame, and the conversion fails with no file written, one pixel short in
+    // either direction too. DNG output does not run the encoder and is not limited.
+    run_case( "RAW input under 42 x 42: GPR output fails, no output", []{
+        const struct { unsigned int w, h; } sizes[] = { { 2048, 16 }, { 41, 42 }, { 42, 41 } };
+
+        for( size_t i = 0; i < sizeof(sizes) / sizeof(sizes[0]); ++i )
+        {
+            const unsigned int w = sizes[i].w, h = sizes[i].h;
+            const std::string raw = scratch_path( "small.RAW" );
+            const std::string gpr = scratch_path( "small.GPR" );
+            const std::string dng = scratch_path( "small.DNG" );
+            check( save_raw( raw, synthetic_raw( w, h, 12, 0 ) ), "raw frame written" );
+
+            dng_convert_params p = raw_cli_params( raw.c_str(), gpr.c_str(), w, h, "rggb12", false );
+            check( dng_convert_main( &p ) != 0, "raw -> gpr reports failure" );
+            check_no_output( gpr );
+
+            dng_convert_params pd = raw_cli_params( raw.c_str(), dng.c_str(), w, h, "rggb12", false );
+            check( dng_convert_main( &pd ) == 0, "raw -> dng succeeds" );
+            std::remove( raw.c_str() );
+
+            Buffer d;
+            check( load_file( dng.c_str(), d ), "dng written" );
+            std::remove( dng.c_str() );
+            validate_dng_like( d, w, h, /*vc5=*/false );
+        }
+    });
+
+    run_case( "RAW input at 42 x 42: GPR output encodes and reads back", []{
+        const unsigned int w = 42, h = 42;
+        const std::string raw  = scratch_path( "min.RAW" );
+        const std::string gpr  = scratch_path( "min.GPR" );
+        const std::string back = scratch_path( "min_back.RAW" );
+        check( save_raw( raw, synthetic_raw( w, h, 12, 0 ) ), "raw frame written" );
+
+        dng_convert_params p = raw_cli_params( raw.c_str(), gpr.c_str(), w, h, "rggb12", false );
+        check( dng_convert_main( &p ) == 0, "raw -> gpr succeeds" );
+        std::remove( raw.c_str() );
+
+        Buffer o;
+        const bool loaded = load_file( gpr.c_str(), o );
+        check( loaded, "gpr written" );
+        if( !loaded ) return;
+        validate_dng_like( o, w, h, /*vc5=*/true );
+
+        dng_convert_params pr = preview_cli_params( gpr.c_str(), back.c_str(), "" );
+        check( dng_convert_main( &pr ) == 0, "gpr -> raw succeeds" );
+        std::remove( gpr.c_str() );
+
+        Buffer r;
+        check( load_file( back.c_str(), r ), "raw written" );
+        std::remove( back.c_str() );
+        validate_raw( r, w, h );
+    });
 }
 
 // ---------------------------------------------------------------------------

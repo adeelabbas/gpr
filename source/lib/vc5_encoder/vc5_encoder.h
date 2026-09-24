@@ -79,6 +79,18 @@
     } VC5_ENCODER_QUALITY_SETTING;
 
     /*!
+     @brief Smallest frame the encoder accepts, in pixels in each direction
+
+     The boundary filters of each of the three wavelet levels read the first six rows and columns
+     of that level's input, and the third level's input is a quarter of a channel (half the frame)
+     rounded up: 21 samples, a 42-pixel frame, is the smallest channel that still gives it six.
+     Checked over channels of 1 to 40 samples each way in all ten pixel formats, scalar and NEON:
+     every size under 21 x 21 reads or writes outside a level, and none from 21 x 21 up does.
+     vc5_encoder_process returns CODEC_ERROR_IMAGE_DIMENSIONS for a smaller frame.
+     */
+    #define VC5_ENCODER_MIN_FRAME_SIZE      42
+
+    /*!
      @brief vc5 encoder parameters
      */
     typedef struct

@@ -30,6 +30,7 @@
 #endif
 
 #include "gpr_utils.h"
+#include "log.h"
 
 #if GPR_WRITING
 
@@ -75,8 +76,13 @@ bool gpr_image_writer::EncodeVc5Image()
         gpr_buffer vc5_image = { _vc5_buffer->get_buffer(), _vc5_buffer->get_size() };
         
         // A failed encode hands back no bitstream (and no thumbnail), so there is no GPR to write
-        if( vc5_encoder_process( &vc5_encoder_params, &raw_image, &vc5_image, &_rgb_thumbnail ) != CODEC_ERROR_OKAY )
+        const CODEC_ERROR error = vc5_encoder_process( &vc5_encoder_params, &raw_image, &vc5_image, &_rgb_thumbnail );
+        if( error != CODEC_ERROR_OKAY )
         {
+            if( error == CODEC_ERROR_IMAGE_DIMENSIONS )
+                LogPrint( "A %u x %u frame is too small to encode: the VC-5 encoder needs at least %d x %d",
+                          vc5_encoder_params.input_width, vc5_encoder_params.input_height,
+                          VC5_ENCODER_MIN_FRAME_SIZE, VC5_ENCODER_MIN_FRAME_SIZE );
             return false;
         }
         

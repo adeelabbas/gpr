@@ -78,6 +78,15 @@ CODEC_ERROR vc5_encoder_process(const vc5_encoder_parameters*   encoding_paramet
     vc5_buffer->buffer = NULL;
     vc5_buffer->size = 0;
 
+    // Refuse a frame the wavelet filters would run outside of (see VC5_ENCODER_MIN_FRAME_SIZE):
+    // they read before and past a level's input (4 bytes before it when its rows are 4 samples
+    // wide), and a level 2 rows tall or fewer (a frame under 18 rows) wraps the transform's last
+    // middle row index round, so it writes past the wavelet
+    if (encoding_parameters->input_width < VC5_ENCODER_MIN_FRAME_SIZE ||
+        encoding_parameters->input_height < VC5_ENCODER_MIN_FRAME_SIZE) {
+        return CODEC_ERROR_IMAGE_DIMENSIONS;
+    }
+
     // Size the output for the worst case rather than for a compression ratio: 12-bit noise
     // encodes to 8.4 bits per pixel at Filmscan-X and 11.1 at Ultra, past the 8 (16-bit input)
     // or 6 (packed input) that half of the input buffer allowed. Each of the four channels is a
