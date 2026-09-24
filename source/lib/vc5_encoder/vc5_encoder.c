@@ -36,6 +36,33 @@ void vc5_encoder_parameters_set_default(vc5_encoder_parameters* encoding_paramet
     rgb_parameters_set_default(&encoding_parameters->rgb_params);
 }
 
+/*!
+ @brief Free the output of a failed encode and leave the caller an empty buffer
+
+ The caller cannot tell a partial bitstream from a complete one, so a failed encode
+ hands back neither the bitstream nor the thumbnail rendered alongside it.
+ */
+static void ReleaseEncoderOutput(const vc5_encoder_parameters* encoding_parameters, gpr_buffer* vc5_buffer, RGB_IMAGE* rgb_image)
+{
+    if (vc5_buffer->buffer != NULL) {
+        encoding_parameters->mem_free(vc5_buffer->buffer);
+    }
+    vc5_buffer->buffer = NULL;
+    vc5_buffer->size = 0;
+
+    if (rgb_image->buffer != NULL) {
+        encoding_parameters->mem_free(rgb_image->buffer);
+        rgb_image->buffer = NULL;
+    }
+}
+
+/*!
+ @brief Encode a raw frame into a VC-5 bitstream
+
+ On success vc5_buffer holds the bitstream, allocated with mem_alloc and owned by the
+ caller. On any error vc5_buffer is left empty (NULL, 0), rgb_buffer is not written,
+ and nothing the call allocated is left behind.
+ */
 CODEC_ERROR vc5_encoder_process(const vc5_encoder_parameters*   encoding_parameters,    /* vc5 encoding parameters */
                                 const gpr_buffer*               raw_buffer,             /* raw input buffer. */
                                       gpr_buffer*               vc5_buffer,
@@ -47,6 +74,10 @@ CODEC_ERROR vc5_encoder_process(const vc5_encoder_parameters*   encoding_paramet
     
     STREAM bitstream_file;
     
+    // Nothing is handed back until the encode succeeds
+    vc5_buffer->buffer = NULL;
+    vc5_buffer->size = 0;
+
     // Size the output for the worst case rather than for a compression ratio: 12-bit noise
     // encodes to 8.4 bits per pixel at Filmscan-X and 11.1 at Ultra, past the 8 (16-bit input)
     // or 6 (packed input) that half of the input buffer allowed. Each of the four channels is a
@@ -178,26 +209,32 @@ CODEC_ERROR vc5_encoder_process(const vc5_encoder_parameters*   encoding_paramet
     parameters.decompositor = DecomposeFields;
 #endif
     
+    RGB_IMAGE rgb_image;
+    InitRGBImage(&rgb_image);
+
     vc5_buffer->buffer = encoding_parameters->mem_alloc( max_vc5_buffer_size );
-    
+    if (vc5_buffer->buffer == NULL) {
+        return CODEC_ERROR_OUTOFMEMORY;
+    }
+
     // Open a stream to the output file
     error = CreateStreamBuffer(&bitstream_file, vc5_buffer->buffer, max_vc5_buffer_size );
     if (error != CODEC_ERROR_OKAY) {
+        ReleaseEncoderOutput(encoding_parameters, vc5_buffer, &rgb_image);
         return error;
     }
-    
-    RGB_IMAGE rgb_image;
-    InitRGBImage(&rgb_image);
 
     // Encode the image into the byte stream
     error = EncodeImage(&image, &bitstream_file, &rgb_image, &parameters);
     if (error != CODEC_ERROR_OKAY) {
+        ReleaseEncoderOutput(encoding_parameters, vc5_buffer, &rgb_image);
         return error;
     }
     
     // The stream stops storing at the end of the buffer but keeps counting, so a count past
     // the end means the bitstream was cut short
     if (bitstream_file.byte_count > max_vc5_buffer_size) {
+        ReleaseEncoderOutput(encoding_parameters, vc5_buffer, &rgb_image);
         return CODEC_ERROR_FILE_WRITE;
     }
 

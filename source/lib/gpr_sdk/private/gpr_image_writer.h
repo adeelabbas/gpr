@@ -44,7 +44,8 @@ private:
     
 public:
     
-    void EncodeVc5Image();
+    // False when the VC-5 encode failed, which leaves no bitstream to write
+    bool EncodeVc5Image();
     
     const gpr_rgb_buffer& get_rgb_thumbnail() { return _rgb_thumbnail; }
     

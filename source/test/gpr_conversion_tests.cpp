@@ -49,6 +49,11 @@
 #define GPR_TESTS_DATA_DIR "data/samples"
 #endif
 
+#if GPR_WRITING
+#include <cassert>               // vc5_common/pixel.h uses assert without including it itself
+#include "vc5_encoder.h"         // the codec's entry point, driven directly by the allocation cases
+#endif
+
 #if GPR_JPEG_AVAILABLE
 // tiny_jpeg is compiled as C; declare the one entry point we use with C linkage
 // instead of pulling the (non-extern-"C") header into this C++ translation unit.
@@ -2404,6 +2409,115 @@ static void run_flat_write_stream_tests()
     });
 }
 
+#if GPR_WRITING
+// -------- vc5_encoder_process allocations ----------------------------------
+//
+// The encoder takes its allocator as two function pointers, so a counting allocator is a
+// ground truth for what an encode leaves behind that does not depend on the encoder's word:
+// after a clean encode the caller owns the bitstream (and the thumbnail, when one is
+// rendered), after a failed one nothing.
+static int g_vc5_alloc_calls   = 0;     // Alloc calls, including the one made to fail
+static int g_vc5_alloc_fail_at = 0;     // 1-based call to fail, 0 for none
+static int g_vc5_allocs        = 0;     // blocks handed out
+static int g_vc5_frees         = 0;     // blocks handed back
+
+static void* counting_alloc( size_t size )
+{
+    if( ++g_vc5_alloc_calls == g_vc5_alloc_fail_at )
+        return NULL;
+
+    void* p = malloc( size );
+    if( p )
+        g_vc5_allocs++;
+    return p;
+}
+
+static void counting_free( void* p )
+{
+    if( p )
+    {
+        g_vc5_frees++;
+        free( p );
+    }
+}
+
+// Encodes a 128x96 rggb12 frame from the fixed formula through the counting allocator,
+// failing its fail_at-th allocation (0: none).
+static CODEC_ERROR encode_counted( int fail_at, GPR_RGB_RESOLUTION thumbnail, gpr_buffer* vc5, gpr_rgb_buffer* rgb )
+{
+    const unsigned int W = 128, H = 96;
+
+    std::vector<unsigned short> raw( W * H );
+    for( size_t i = 0; i < raw.size(); i++ )
+        raw[i] = (unsigned short)( ( i * 131 + 7 ) & 0x0FFF );
+
+    vc5_encoder_parameters params;
+    vc5_encoder_parameters_set_default( &params );
+    params.input_width           = W;
+    params.input_height          = H;
+    params.input_pitch           = W * sizeof(unsigned short);
+    params.pixel_format          = VC5_ENCODER_PIXEL_FORMAT_RGGB_12;
+    params.mem_alloc             = counting_alloc;
+    params.mem_free              = counting_free;
+    params.rgb_params.resolution = thumbnail;
+
+    gpr_buffer raw_buffer = { &raw[0], raw.size() * sizeof(unsigned short) };
+
+    g_vc5_alloc_calls   = 0;
+    g_vc5_alloc_fail_at = fail_at;
+    g_vc5_allocs        = 0;
+    g_vc5_frees         = 0;
+
+    return vc5_encoder_process( &params, &raw_buffer, vc5, rgb );
+}
+
+static void run_vc5_encoder_allocation_tests()
+{
+    std::printf( "\n== vc5_encoder_process allocations ==\n" );
+
+    run_case( "vc5_encoder_process: a clean encode leaves only its output allocated", []{
+        {
+            gpr_buffer     vc5 = { NULL, 0 };
+            gpr_rgb_buffer rgb = { NULL, 0, 0, 0 };
+
+            check( encode_counted( 0, GPR_RGB_RESOLUTION_NONE, &vc5, &rgb ) == CODEC_ERROR_OKAY, "encode succeeds" );
+            check( vc5.buffer != NULL && vc5.size > 0, "bitstream returned" );
+            check( rgb.buffer == NULL, "no thumbnail without a preview resolution" );
+            check( g_vc5_allocs - g_vc5_frees == 1, "only the bitstream is still allocated" );
+
+            counting_free( vc5.buffer );
+            check( g_vc5_allocs == g_vc5_frees, "freeing the bitstream frees everything" );
+        }
+        {
+            gpr_buffer     vc5 = { NULL, 0 };
+            gpr_rgb_buffer rgb = { NULL, 0, 0, 0 };
+
+            check( encode_counted( 0, GPR_RGB_RESOLUTION_QUARTER, &vc5, &rgb ) == CODEC_ERROR_OKAY, "encode with thumbnail succeeds" );
+            check( vc5.buffer != NULL && vc5.size > 0, "bitstream returned with thumbnail" );
+            check( rgb.buffer != NULL && rgb.width == 32 && rgb.height == 24, "4:1 thumbnail returned" );
+            check( g_vc5_allocs - g_vc5_frees == 2, "only the bitstream and thumbnail are still allocated" );
+
+            counting_free( vc5.buffer );
+            counting_free( rgb.buffer );
+            check( g_vc5_allocs == g_vc5_frees, "freeing both frees everything" );
+        }
+    });
+
+    // Before the encoder checked it, a NULL output buffer crashed on the first write
+    run_case( "vc5_encoder_process: a failed first allocation leaves nothing allocated", []{
+        int stale = 0;
+        gpr_buffer     vc5 = { &stale, 12345 };     // what the call must clear
+        gpr_rgb_buffer rgb = { NULL, 0, 0, 0 };
+
+        check( encode_counted( 1, GPR_RGB_RESOLUTION_QUARTER, &vc5, &rgb ) == CODEC_ERROR_OUTOFMEMORY, "out of memory reported" );
+        check( g_vc5_alloc_calls == 1, "encode stopped at the failed allocation" );
+        check( vc5.buffer == NULL && vc5.size == 0, "bitstream left empty" );
+        check( rgb.buffer == NULL, "no thumbnail returned" );
+        check( g_vc5_allocs == g_vc5_frees, "every allocation freed" );
+    });
+}
+#endif
+
 int main( int argc, char* argv[] )
 {
     const char* data_dir = ( argc > 1 ) ? argv[1] : GPR_TESTS_DATA_DIR;
@@ -2440,6 +2554,10 @@ int main( int argc, char* argv[] )
     run_raw_input_cli_tests();
 
     run_argument_parser_tests();
+
+#if GPR_WRITING
+    run_vc5_encoder_allocation_tests();
+#endif
 
     run_flat_write_stream_tests();
 
