@@ -32,6 +32,7 @@
 
 #if defined(__unix__) || defined(__APPLE__)
 #include <unistd.h>
+#include <sys/mman.h>
 #include <sys/wait.h>
 #define GPR_TESTS_HAVE_FORK 1
 #else
@@ -2415,7 +2416,9 @@ static void run_flat_write_stream_tests()
 // The encoder takes its allocator as two function pointers, so a counting allocator is a
 // ground truth for what an encode leaves behind that does not depend on the encoder's word:
 // after a clean encode the caller owns the bitstream (and the thumbnail, when one is
-// rendered), after a failed one nothing.
+// rendered), after a failed one nothing. An allocator that ends every block at an
+// inaccessible page turns a read past the end of an encoder buffer into a crash in any build,
+// where a plain build would read the next allocation without a sign.
 static int g_vc5_alloc_calls   = 0;     // Alloc calls, including the one made to fail
 static int g_vc5_alloc_fail_at = 0;     // 1-based call to fail, 0 for none
 static int g_vc5_allocs        = 0;     // blocks handed out
@@ -2471,6 +2474,63 @@ static CODEC_ERROR encode_counted( int fail_at, GPR_RGB_RESOLUTION thumbnail, gp
     return vc5_encoder_process( &params, &raw_buffer, vc5, rgb );
 }
 
+#if GPR_TESTS_HAVE_FORK
+// Allocates each block at the end of its own mapping, followed by a PROT_NONE page. Blocks are
+// 16-byte aligned, so one whose size is a multiple of 16 ends exactly at the fence. The mapping
+// is recorded just below the block.
+struct FencedMapping { void* base; size_t length; };
+
+static void* fenced_alloc( size_t size )
+{
+    const size_t page    = (size_t)sysconf( _SC_PAGESIZE );
+    const size_t rounded = ( size + 15 ) & ~(size_t)15;
+    const size_t length  = ( ( rounded + sizeof(FencedMapping) + page - 1 ) / page + 1 ) * page;
+
+    unsigned char* base = (unsigned char*)mmap( NULL, length, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0 );
+    if( base == (unsigned char*)MAP_FAILED ) return NULL;
+
+    unsigned char* fence = base + length - page;
+    if( mprotect( fence, page, PROT_NONE ) != 0 ) { munmap( base, length ); return NULL; }
+
+    unsigned char* block = fence - rounded;
+    const FencedMapping mapping = { base, length };
+    std::memcpy( block - sizeof(mapping), &mapping, sizeof(mapping) );
+    return block;
+}
+
+static void fenced_free( void* block )
+{
+    if( block == NULL ) return;
+    FencedMapping mapping;
+    std::memcpy( &mapping, (unsigned char*)block - sizeof(mapping), sizeof(mapping) );
+    munmap( mapping.base, mapping.length );
+}
+
+// Encodes a width x 64 rggb14 synthetic_raw frame with the given allocator. Returns the
+// bitstream (owned by the caller, freed with that allocator's free), or an empty buffer.
+static gpr_buffer encode_synthetic( unsigned int width, gpr_malloc mem_alloc, gpr_free mem_free, CODEC_ERROR& error )
+{
+    const unsigned int height = 64;
+    std::vector<uint16_t> raw = synthetic_raw( width, height, 14, 0 );
+
+    vc5_encoder_parameters params;
+    vc5_encoder_parameters_set_default( &params );
+    params.input_width  = width;
+    params.input_height = height;
+    params.input_pitch  = width * 2;
+    params.pixel_format = VC5_ENCODER_PIXEL_FORMAT_RGGB_14;
+    params.mem_alloc    = mem_alloc;
+    params.mem_free     = mem_free;
+
+    gpr_buffer in  = { &raw[0], raw.size() * sizeof(raw[0]) };
+    gpr_buffer out = { NULL, 0 };
+    error = vc5_encoder_process( &params, &in, &out, NULL );
+    return out;
+}
+
+static unsigned int g_fenced_width;
+#endif // GPR_TESTS_HAVE_FORK
+
 static void run_vc5_encoder_allocation_tests()
 {
     std::printf( "\n== vc5_encoder_process allocations ==\n" );
@@ -2515,6 +2575,35 @@ static void run_vc5_encoder_allocation_tests()
         check( rgb.buffer == NULL, "no thumbnail returned" );
         check( g_vc5_allocs == g_vc5_frees, "every allocation freed" );
     });
+
+#if GPR_TESTS_HAVE_FORK
+    // The horizontal wavelet filter reads 16 inputs a call. For a row width of 5, 6 or 7 (mod 8)
+    // its last call used to read 1 to 3 samples past the row, which on the last row of a channel
+    // is past the component array: 2005, 2006 and 2007 are those widths for the first level.
+    // Each array is 2 x width x 32 bytes, a multiple of 16, so it ends at the fence. The ground
+    // truth is the same encode through malloc, which must give the same bitstream.
+    const unsigned int channel_widths[] = { 2005, 2006, 2007 };
+    for( size_t i = 0; i < sizeof(channel_widths) / sizeof(channel_widths[0]); ++i )
+    {
+        g_fenced_width = 2 * channel_widths[i];
+        char name[80];
+        std::snprintf( name, sizeof(name), "vc5_encoder_process: no read past a channel %u pixels wide", channel_widths[i] );
+        run_case( name, []{
+            CODEC_ERROR fenced_error = CODEC_ERROR_OKAY, plain_error = CODEC_ERROR_OKAY;
+            gpr_buffer fenced = encode_synthetic( g_fenced_width, fenced_alloc, fenced_free, fenced_error );
+            gpr_buffer plain  = encode_synthetic( g_fenced_width, malloc, free, plain_error );
+
+            check( fenced_error == CODEC_ERROR_OKAY && fenced.buffer != NULL, "fenced encode succeeds" );
+            check( plain_error == CODEC_ERROR_OKAY && plain.buffer != NULL, "malloc encode succeeds" );
+            check( fenced.size == plain.size && fenced.buffer && plain.buffer &&
+                   std::memcmp( fenced.buffer, plain.buffer, plain.size ) == 0,
+                   "same bitstream as the malloc encode" );
+
+            fenced_free( fenced.buffer );
+            free( plain.buffer );
+        });
+    }
+#endif
 }
 #endif
 

@@ -94,24 +94,19 @@ void HorizontalFilter_Prescale2_4x_NEON_(PIXEL *input, PIXEL* lowpass, PIXEL* hi
         const int16x8_t __prescale_rounding	= vdupq_n_s16 (prescale_rounding);
         const int16x8_t __shift				= vdupq_n_s16 (-prescale);
         
+        // The 12 inputs from input[0] are all a 4x call uses. A load of input + 8 would read 4
+        // more, past the row, and past the image on its last row when the width is 5, 6 or 7 (mod 8).
         int16x8_t   __input_0_7 = vld1q_s16( input );
                     __input_2_9 = vld1q_s16( input + 2 );
-        int16x8_t   __input_8_15 = vld1q_s16( input + 8 );
+        int16x8_t   __input_4_11 = vld1q_s16( input + 4 );
 
-        __input_0_7 = vaddq_s16( __input_0_7, __prescale_rounding );
-        __input_0_7 = vshlq_s16( __input_0_7, __shift );
-        
-        __input_8_15 = vaddq_s16( __input_8_15, __prescale_rounding );
-        __input_8_15 = vshlq_s16( __input_8_15, __shift );
-        
+        __input_0_7  = vshlq_s16( vaddq_s16( __input_0_7, __prescale_rounding ), __shift );
+        __input_4_11 = vshlq_s16( vaddq_s16( __input_4_11, __prescale_rounding ), __shift );
+        int16x8_t __scaled_2_9 = vshlq_s16( vaddq_s16( __input_2_9, __prescale_rounding ), __shift );
+
                     __pairwise_sum_0_7  = vpaddlq_s16(__input_0_7);
-        int32x4_t   __pairwise_sum_8_15 = vpaddlq_s16(__input_8_15);
-        
-        __input_0_7  = vbslq_s16(mask, vnegq_s16(__input_0_7), __input_0_7);
-        __input_8_15 = vbslq_s16(mask, vnegq_s16(__input_8_15), __input_8_15);
-        __diff =  vextq_s32(vpaddlq_s16( __input_0_7 ), vpaddlq_s16( __input_8_15 ), 1);
-
-        __highpass = vcombine_s32( vget_high_s32(__pairwise_sum_0_7), vget_low_s32(__pairwise_sum_8_15) );
+        __highpass = vpaddlq_s16(__input_4_11);
+        __diff = vpaddlq_s16( vbslq_s16(mask, vnegq_s16(__scaled_2_9), __scaled_2_9) );
     }
     
     // High pass band
@@ -148,18 +143,14 @@ void HorizontalFilter_Prescale0_4x_NEON_(PIXEL *input, PIXEL* lowpass, PIXEL* hi
     int16x8_t __input_2_9;
 
     {
+        // The 12 inputs from input[0] only, as in HorizontalFilter_Prescale2_4x_NEON_
         int16x8_t   __input_0_7 = vld1q_s16( input );
                     __input_2_9 = vld1q_s16( input + 2 );
-        int16x8_t   __input_8_15 = vld1q_s16( input + 8 );
+        int16x8_t   __input_4_11 = vld1q_s16( input + 4 );
 
                     __pairwise_sum_0_7  = vpaddlq_s16(__input_0_7);
-        int32x4_t   __pairwise_sum_8_15 = vpaddlq_s16(__input_8_15);
-        
-        __input_0_7  = vbslq_s16(mask, vnegq_s16(__input_0_7), __input_0_7);
-        __input_8_15 = vbslq_s16(mask, vnegq_s16(__input_8_15), __input_8_15);
-        __diff =  vextq_s32(vpaddlq_s16( __input_0_7 ), vpaddlq_s16( __input_8_15 ), 1);
-
-        __highpass = vcombine_s32( vget_high_s32(__pairwise_sum_0_7), vget_low_s32(__pairwise_sum_8_15) );
+        __highpass = vpaddlq_s16(__input_4_11);
+        __diff = vpaddlq_s16( vbslq_s16(mask, vnegq_s16(__input_2_9), __input_2_9) );
     }
     
     // High pass band
