@@ -18,7 +18,12 @@ inside it, and you should always name files by their absolute path:
 - `@INPUT@/commits.md` - every commit in the pull request, with its full
   message.
 - `@INPUT@/code/` - the repository checked out at the head commit. Every file
-  the diff touches is here in its new state, with the code around it.
+  the diff touches is here in its new state, with the code around it. Except: the
+  files and directories the CLIs load as instructions (AGENTS.md,
+  GEMINI.md, CLAUDE.md and their variants, `.claude/rules`, `.gemini` and
+  the like), at any depth, and every symbolic link are taken out of it.
+  `diff.patch` still carries their edits and each link's target, so a path
+  the diff touches that is missing here is one of those, not a deletion.
 - `@INPUT@/checks.md` - what the script established before you started, by
   running what you cannot: whether each changed shell or Python file
   parses. Take these as settled rather than as open questions.

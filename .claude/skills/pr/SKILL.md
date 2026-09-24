@@ -3,7 +3,7 @@ name: pr
 description: Open a pull request for this branch, in order - check the README contract where CLAUDE.md sets one, write the case the change owes (the coverage skill), run the suite, commit the case, carry the change across to a repository CLAUDE.md keeps in sync, draft the title and body to CLAUDE.md's PR conventions with the suite's tally, push the branch, open the pull request. Only when the user types /pr.
 argument-hint: "[title, optional]"
 disable-model-invocation: true
-allowed-tools: Bash(git symbolic-ref --short refs/remotes/origin/HEAD), Bash(git fetch origin master), Bash(git fetch origin main), Bash(git merge-base *), Bash(git rev-parse *), Bash(git branch --show-current), Bash(git status --short), Bash(git add *), Bash(git commit *), Bash(git push -u origin HEAD), Bash(gh pr list *), Bash(gh pr create *), Bash(cmake -S . -B build), Bash(cmake -S . -B build -DCMAKE_BUILD_TYPE=Release), Bash(cmake --build build -j), Bash(cmake --build build --target gpr_tools_tests), Bash(cmake --build build --target gpr_tools_tests -j), Bash(ctest --test-dir build), Bash(ctest --test-dir build --output-on-failure), Bash(ctest --test-dir build --output-on-failure -C Release), Bash(ctest --test-dir build --output-on-failure -C Debug)
+allowed-tools: Bash(git symbolic-ref --short refs/remotes/origin/HEAD), Bash(git fetch origin master), Bash(git fetch origin main), Bash(git merge-base *), Bash(git rev-parse *), Bash(git branch --show-current), Bash(git remote get-url origin), Bash(git status --short), Bash(git add source/test/gpr_conversion_tests.cpp), Bash(git commit -F build/pr/case-msg.txt -- source/test/gpr_conversion_tests.cpp), Bash(git push -u origin HEAD), Bash(gh pr list *), Bash(gh pr create -R *), Bash(cmake -S . -B build), Bash(cmake -S . -B build -DCMAKE_BUILD_TYPE=Release), Bash(cmake --build build -j), Bash(cmake --build build --target gpr_tools_tests), Bash(cmake --build build --target gpr_tools_tests -j), Bash(ctest --test-dir build), Bash(ctest --test-dir build --output-on-failure), Bash(ctest --test-dir build --output-on-failure -C Release), Bash(ctest --test-dir build --output-on-failure -C Debug)
 ---
 
 # Open a pull request, with its test already in it
@@ -32,23 +32,33 @@ All paths below are relative to the repository root.
 
 ## 1. Check before anything changes
 
+- This repository on GitHub: `git remote get-url origin` prints
+  `git@github.com:<owner>/<repo>.git` or
+  `https://github.com/<owner>/<repo>.git`, and `<owner>/<repo>` below is
+  that pair without `.git` (`<host>/<owner>/<repo>` when the host is not
+  github.com). Every `gh` command here names it with `-R`, because in a
+  clone of a fork a bare `gh` resolves to the fork's parent: from a
+  `gh repo clone adeelabbas/gpr` checkout, which adds gopro/gpr as
+  `upstream`, `gh pr create` would open the pull request on gopro/gpr.
 - The default branch (`master` in adeelabbas/gpr, `main` in gpraw/gpr):
   `git symbolic-ref --short refs/remotes/origin/HEAD` prints
-  `origin/<default>`. When it fails, `gh repo view --json defaultBranchRef
-  --jq .defaultBranchRef.name` names it. `<default>` below is that name.
+  `origin/<default>`. When it fails, `gh repo view <owner>/<repo> --json
+  defaultBranchRef --jq .defaultBranchRef.name` names it. `<default>`
+  below is that name.
 - On a branch, and not the default branch: `git branch --show-current`.
   On the default branch, or on no branch at all, stop.
 - `git fetch origin <default>`. Then `git merge-base --is-ancestor
   origin/<default> HEAD`. When it fails the branch is behind the default
   branch. That does not stop the pull request, but say so in the report:
-  where the default branch requires branches to be up to date (gpraw/gpr's
-  `main`), `/merge` refuses a branch behind it; where it does not
-  (adeelabbas/gpr's `master`), the merge would go through on a combination
-  CI never built. Catching it up is the operator's call, not this skill's. `<base>` below is `git merge-base HEAD
-  origin/<default>`.
-- No open pull request for this branch already: `gh pr list --head <branch>
-  --state open`. When there is one, stop and name it; edit it rather than
-  open a second.
+  where branch protection requires branches to be up to date, GitHub
+  reports the pull request `BEHIND` and `/merge` refuses it; where it does
+  not, the merge would go through on a combination CI never built. Which
+  it is, the pull request's `mergeStateStatus` says once it is open.
+  Catching it up is the operator's call, not this skill's. `<base>` below
+  is `git merge-base HEAD origin/<default>`.
+- No open pull request for this branch already: `gh pr list -R
+  <owner>/<repo> --head <branch> --state open`. When there is one, stop
+  and name it; edit it rather than open a second.
 - Uncommitted edits. `git status --short` lists them. Edits to
   `source/test/gpr_conversion_tests.cpp` left by an earlier `/coverage` run
   are expected and are committed in step 4. Anything else uncommitted is
@@ -100,7 +110,19 @@ commit ahead of the push. Its subject is an imperative sentence naming the
 behavior now covered; its body says what the case asserts, against what
 ground truth, and ends with the tally. That is the shape CI's own test-gap
 commits take, and it is a code commit, so step 5 carries it across with
-the rest.
+the rest. Write the message to `build/pr/case-msg.txt` (`build/` is
+gitignored), then:
+
+    git add source/test/gpr_conversion_tests.cpp
+    git commit -F build/pr/case-msg.txt -- source/test/gpr_conversion_tests.cpp
+
+Type the commit exactly so; it is the one form pre-approved, and any other
+prompts. The pathspec is what keeps it to the case: a commit that names its
+paths takes only those, whatever else is staged or edited, so the
+operator's own edit stays out of it (measured with another file edited and
+staged: the commit held the case alone, and the other file was still
+staged after it). `-a`, `--all` or a wider pathspec would take that edit
+along.
 
 A case that did not go green is not committed. `/coverage` has already
 taken it back out; the body in step 6 says what it would have asserted and
@@ -127,7 +149,7 @@ nothing of the kind, skip this step.
    `.git/config` gives `origin` as that repository, over ssh or https; read
    the file rather than running git in it. With none, or more than one,
    ask the operator for the path and wait. Its default branch:
-   `gh repo view <owner>/<name> --json defaultBranchRef --jq
+   `gh repo view <its owner>/<its repo> --json defaultBranchRef --jq
    .defaultBranchRef.name`, or, when `gh` cannot read that repository,
    `git -C <clone> symbolic-ref --short refs/remotes/origin/HEAD`, which
    prints `origin/<its default>`.
@@ -179,8 +201,9 @@ not a fourth telling.
 
 The title is `$ARGUMENTS` when given. Otherwise write one to CLAUDE.md's
 "PR and commit conventions": an imperative sentence naming the outcome,
-with an optional `component:` prefix. No `(#NN)`; GitHub adds it when it
-squashes.
+with an optional `component:` prefix. No `(#NN)`: a squash merge adds it,
+and a rebase merge lands the commits under their own subjects, not the
+title.
 
 The body follows the same section, in plain ASCII wrapped near 72 columns:
 
@@ -208,17 +231,17 @@ read it back once as a reviewer would.
 ## 7. Push and open
 
     git push -u origin HEAD
-    gh pr create --base <default> --head <branch> --title '<title>' --body-file build/pr/<branch>.md
+    gh pr create -R <owner>/<repo> --base <default> --head <branch> --title '<title>' --body-file build/pr/<branch>.md
 
 The push is a plain push. A refusal means origin's branch has commits this
 checkout does not; stop and say so rather than forcing it.
 
 Opening the pull request starts whichever of `build-flags.yml`,
 `claude-review.yml` and `claude-test-gap-check.yml` the repository has
-under `.github/workflows/`, on the paths they watch; adeelabbas/gpr has
-only the first. That is expected; where the test-gap pass runs, with the
-case already in the branch it should report the coverage adequate and
-commit nothing.
+under `.github/workflows/`, each where its own trigger (`on:`) admits the
+change; adeelabbas/gpr has only the first. That is expected; where the
+test-gap pass runs, with the case already in the branch it should report
+the coverage adequate and commit nothing.
 
 ## 8. Tell the user
 

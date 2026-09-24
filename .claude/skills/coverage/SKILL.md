@@ -3,7 +3,7 @@ name: coverage
 description: Write the test case this branch's change owes, to CLAUDE.md's Testing standards, and prove it green in the local suite. Reads the diff from the default branch, uncommitted edits included. Commits nothing, pushes nothing, posts nothing. Only when the user types /coverage, or as a step of /pr.
 argument-hint: "[base ref, default the merge base with the default branch]"
 disable-model-invocation: true
-allowed-tools: Bash(git symbolic-ref --short refs/remotes/origin/HEAD), Bash(git merge-base *), Bash(git rev-parse *), Bash(git branch --show-current), Bash(cmake -S . -B build), Bash(cmake -S . -B build -DCMAKE_BUILD_TYPE=Release), Bash(cmake --build build -j), Bash(cmake --build build --target gpr_tools_tests), Bash(cmake --build build --target gpr_tools_tests -j), Bash(ctest --test-dir build), Bash(ctest --test-dir build --output-on-failure), Bash(ctest --test-dir build --output-on-failure -C Release), Bash(ctest --test-dir build --output-on-failure -C Debug), Bash(./build/source/test/gpr_tools_tests *)
+allowed-tools: Bash(git symbolic-ref --short refs/remotes/origin/HEAD), Bash(git remote get-url origin), Bash(git merge-base *), Bash(git rev-parse *), Bash(git branch --show-current), Bash(cmake -S . -B build), Bash(cmake -S . -B build -DCMAKE_BUILD_TYPE=Release), Bash(cmake --build build -j), Bash(cmake --build build --target gpr_tools_tests), Bash(cmake --build build --target gpr_tools_tests -j), Bash(ctest --test-dir build), Bash(ctest --test-dir build --output-on-failure), Bash(ctest --test-dir build --output-on-failure -C Release), Bash(ctest --test-dir build --output-on-failure -C Debug), Bash(./build/source/test/gpr_tools_tests *)
 ---
 
 # Write the case a change owes
@@ -21,11 +21,12 @@ case it writes is the only one the pull request will carry.
 
 Why here: the runner starts cold, and a pass that has to write the case
 configures, builds, finds the path the change moved and runs the suite
-before it can write anything. On gpraw/gpr#38 that reached the job's
-100-turn cap at 18m43s with no comment posted; the cap is 200 since. The
-session that made the change already knows most of what those turns are
-spent learning. When the case is already in the pull request, that pass
-reads the diff, says the coverage is adequate, and is done.
+before it can write anything. On gpraw/gpr#38 that used every turn the
+job then allowed, in 18m43s, and posted no comment; the workflow's
+`--max-turns` says what it allows now. The session that made the change
+already knows most of what those turns are spent learning. When the case
+is already in the pull request, that pass reads the diff, says the
+coverage is adequate, and is done.
 
 All paths below are relative to the repository root.
 
@@ -39,8 +40,13 @@ which that is rather than assuming it:
     git merge-base HEAD origin/<default>
 
 The first prints `origin/<default>`. When it fails, in a clone whose
-`origin/HEAD` was never set, `gh repo view --json defaultBranchRef --jq
-.defaultBranchRef.name` names the branch. The merge base is taken with
+`origin/HEAD` was never set, `gh repo view <owner>/<repo> --json
+defaultBranchRef --jq .defaultBranchRef.name` names the branch, with
+`<owner>/<repo>` from `git remote get-url origin`
+(`git@github.com:<owner>/<repo>.git` or
+`https://github.com/<owner>/<repo>.git`): in a clone of a fork a bare
+`gh repo view` answers for the fork's parent, gopro/gpr from a
+`gh repo clone adeelabbas/gpr` checkout. The merge base is taken with
 origin's copy, which `/pr` fetches first; a local one may not have been
 pulled.
 

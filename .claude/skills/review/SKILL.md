@@ -64,10 +64,18 @@ arguments at all and reviews this branch's PR with the default reviewers.
 This takes several minutes, more on a large PR. Wait for the completion
 notification. Do not poll it.
 
-A URL can name a pull request in another repository. The script refuses
-that before it checks anything out (`error: #NN is a pull request of ...`).
-Tell the user that line. Do not review the foreign pull request from this
-checkout.
+The script pins `gh` to origin's repository before it asks for the pull
+request, so a number is always one of origin's pull requests. Left to
+itself, `gh` resolves a clone of a fork to the fork's parent: from a
+`gh repo clone adeelabbas/gpr` checkout, which adds gopro/gpr as
+`upstream`, `42` would be gopro/gpr#42, and `--post` would comment on
+GoPro's public pull request. A checkout with no `origin` stops there with
+an error that says so.
+
+A URL can name a pull request in another repository, and `gh` follows it
+wherever it points. The script refuses that before it checks anything out
+(`error: #NN is a pull request of ...`). Tell the user that line. Do not
+review the foreign pull request from this checkout.
 
 Its last lines give each reviewer as `<cli>:<model>`, with its verdict and
 review file, `skipped` and why, or `FAILED` and why, then the reconcile's
@@ -111,7 +119,11 @@ It posts `summary.md` behind a header (the commit reviewed, every reviewer
 with its model and verdict, or why it did not finish, and which model
 reconciled) and every full review in a collapsed section. It edits the
 earlier comment from this command if one exists, otherwise posts a new one.
-Then it settles the `needs-coverage` label and removes the checkouts.
+That comment is the newest that starts with the command's marker and was
+written by the `gh` user running the script: on a public repository anyone
+can post a comment that starts with the marker, and one by another account
+is neither edited nor taken for this command's. Then it settles the
+`needs-coverage` label and removes the checkouts.
 
 The label is the script's decision, not yours. It exists for CI's test-gap
 pass, `claude-test-gap-check.yml`, which gpraw/gpr has and adeelabbas/gpr
