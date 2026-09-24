@@ -2013,7 +2013,10 @@ static void write_dng(const gpr_allocator*          allocator,
 
         set_vc5_encoder_parameters( gpr_writer->GetVc5EncoderParams(), &enc_params, preview_shading_tables );
 
-        gpr_writer->EncodeVc5Image();
+        // A failed encode leaves no bitstream, and a GPR without one is not worth writing: return
+        // with the stream empty, which write_dngstream_to_buffer turns into a failed conversion.
+        if( gpr_writer->EncodeVc5Image() == false )
+            return;
     }
     else
 #endif
@@ -2089,6 +2092,11 @@ extern dng_memory_allocator gDefaultDNGMemoryAllocator;
 bool write_dngstream_to_buffer( dng_stream* stream, gpr_buffer* output_buffer, gpr_malloc mem_alloc, gpr_free mem_free )
 {
     size_t buffer_size  = stream->Length();
+
+    // write_dng wrote nothing (the VC-5 encode failed): there is no file to hand back
+    if( buffer_size == 0 )
+        return false;
+
     void*  buffer       = mem_alloc(buffer_size);
     
     stream->SetReadPosition(0);
@@ -2367,7 +2375,8 @@ bool gpr_convert_raw_to_gpr(const gpr_allocator*    allocator,
 
     write_dng( allocator, &out_gpr_stream, adjust_bayer_phase( parameters, &raw_buffer, &shifted_copy ), true, NULL, parameters );
 
-    write_dngstream_to_buffer( &out_gpr_stream, out_gpr_buffer, allocator->Alloc, allocator->Free );
+    if( write_dngstream_to_buffer( &out_gpr_stream, out_gpr_buffer, allocator->Alloc, allocator->Free ) == false )
+        return false;
 
     TIMESTAMP("[END]", 1)
 
@@ -2400,7 +2409,8 @@ bool gpr_convert_dng_to_gpr(const gpr_allocator*    allocator,
 
     write_dng( allocator, &out_gpr_stream, adjust_bayer_phase( parameters, &raw_buffer, &shifted_copy ), true, NULL, parameters );
     
-    write_dngstream_to_buffer( &out_gpr_stream, out_gpr_buffer, allocator->Alloc, allocator->Free );
+    if( write_dngstream_to_buffer( &out_gpr_stream, out_gpr_buffer, allocator->Alloc, allocator->Free ) == false )
+        return false;
     
     TIMESTAMP("[END]", 1)
 
@@ -2527,7 +2537,8 @@ bool gpr_convert_gpr_to_gpr(const gpr_allocator*    allocator,
 
     write_dng( allocator, &out_gpr_stream, &raw_buffer, true, NULL, parameters );
 
-    write_dngstream_to_buffer( &out_gpr_stream, out_gpr_buffer, allocator->Alloc, allocator->Free );
+    if( write_dngstream_to_buffer( &out_gpr_stream, out_gpr_buffer, allocator->Alloc, allocator->Free ) == false )
+        return false;
 
     TIMESTAMP("[END]", 1)
 

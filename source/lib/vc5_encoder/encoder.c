@@ -361,12 +361,17 @@ CODEC_ERROR EncodeImage(IMAGE *image, STREAM *stream, RGB_IMAGE *rgb_image, ENCO
 	// Bind the bitstream to the byte stream
 	error = AttachBitstream(&bitstream, stream);
 	if (error != CODEC_ERROR_OKAY) {
+		ReleaseComponentArrays(&parameters->allocator, &unpacked_image, unpacked_image.component_count);
 		return error;
 	}
 
 	// Encode the component arrays into the bitstream
 	error = EncodingProcess(&encoder, &unpacked_image, &bitstream, parameters);
 	if (error != CODEC_ERROR_OKAY) {
+		// EncodingProcess initializes the encoder before anything in it can fail
+		ReleaseComponentArrays(&parameters->allocator, &unpacked_image, unpacked_image.component_count);
+		ReleaseBitstream(&bitstream);
+		ReleaseEncoder(&encoder);
 		return error;
 	}
     
@@ -576,8 +581,10 @@ CODEC_ERROR ReleaseEncoder(ENCODER *encoder)
 		gpr_allocator *allocator = encoder->allocator;
 		int channel;
 
-		// Free the encoding tables
-		ReleaseCodebooks(allocator, encoder->codeset);
+		// Free the encoding tables, which PrepareEncoder assigns last
+		if (encoder->codeset != NULL) {
+			ReleaseCodebooks(allocator, encoder->codeset);
+		}
 
 		// Free the wavelet tree for each channel
 		for (channel = 0; channel < MAX_CHANNEL_COUNT; channel++)
