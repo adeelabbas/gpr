@@ -45,6 +45,9 @@
 # Quote a #number or a URL: an unquoted # starts a shell comment, which takes
 # the number and every option after it along, so the script would see no
 # arguments at all and review this branch's PR instead.
+# gh is pinned to origin's repository before any PR is looked up, since in
+# a fork's clone it would otherwise answer for the parent (the comment at
+# the pin says more).
 # A URL naming another repository's pull request is refused before anything
 # is checked out. <list> is reviewers separated by commas. --only names one
 # reviewer of the last run by its <cli>:<model>, its model or its CLI, and
@@ -57,8 +60,9 @@
 # summary from stdin instead, for a report written by hand.
 #
 #   1. build/review/pr-<n>/input/, the only directory any reviewer can see:
-#        code/        the PR head, detached, with the instruction files Grok
-#                     would load as rules taken out of it
+#        code/        the PR head, detached, with the instruction files the
+#                     CLIs would load, and every symbolic link, taken out
+#                     of it at every depth
 #        CLAUDE.md    the base branch's copy, the standard
 #        head-CLAUDE.md  the head's CLAUDE.md, when the head still has one
 #        pr.md        title, description, base, head, merge base, and files
@@ -80,13 +84,15 @@
 #      --restricted read-only flags as a Claude reviewer, and it reads
 #      input/checks.md, as the reviewers do.
 #   5. --post: one standing comment on the PR, edited in place when a later
-#      run posts again, and the needs-coverage label - but only when the PR's
-#      current head has no result from claude-test-gap-check.yml and no pass
-#      on the way. That workflow runs by itself when a PR opens, and applying
-#      the label is what starts it again, so a head that is covered or being
-#      covered is left alone, and so is a PR that edits that workflow, where
-#      no pass can run. One that is owed a pass gets the label, taken off first
-#      when an earlier run left it on, since only applying it starts anything.
+#      run by the same gh user posts again (a comment anyone else wrote is
+#      never edited, whatever it starts with), and the needs-coverage label
+#      - but only when the PR's current head has no result from
+#      claude-test-gap-check.yml and no pass on the way. That workflow runs
+#      by itself when a PR opens, and applying the label is what starts it
+#      again, so a head that is covered or being covered is left alone, and
+#      so is a PR that edits that workflow, where no pass can run. One that
+#      is owed a pass gets the label, taken off first when an earlier run
+#      left it on, since only applying it starts anything.
 #      A repository whose base branch has no such workflow (adeelabbas/gpr;
 #      gpraw/gpr has one) has no pass to start, and its label is not touched.
 #      coverage_verdict, below, is the rule and what it was measured against;
@@ -106,7 +112,7 @@
 # effort; a Gemini model carries its effort in its name.
 # GPR_REVIEW_CLAUDE_TIMEOUT, GPR_REVIEW_GROK_TIMEOUT and
 # GPR_REVIEW_GEMINI_TIMEOUT (default: 30m each; seconds, or with an s, m or
-# h suffix) bound each reviewer.
+# h suffix, and more than zero) bound each reviewer.
 # GPR_REVIEW_RECONCILE_EFFORT (default: high) and
 # GPR_REVIEW_RECONCILE_TIMEOUT (default: 20m) pick the reconciler's run.
 # GPR_REVIEW_NO_POST=1 makes --post a rehearsal: it assembles the comment
@@ -175,17 +181,52 @@ sys.exit(0 if any(p in blob for p in phrases) else 1)
 PY
 }
 
-# Names Grok treats as instructions, from its project-rules discovery: the
-# AGENTS/CLAUDE filenames, the .claude copies of those, and the three rules
-# directories. CLAUDE.md itself is moved aside by the caller before this runs,
-# because the reviewer still has to read the head's copy. Removed from the
-# checkout only; the diff was written first.
+# What the three CLIs load as instructions when they read a folder: the
+# files AGENTS.md, Agents.md, AGENT.md, GEMINI.md, Claude.md, CLAUDE.md and
+# CLAUDE.local.md, and the directories .claude/rules, .grok/rules,
+# .cursor/rules, .agents, .agent and .gemini. Grok's discovery also loads a
+# deeper file when it reads the folder that holds it, so they are taken out
+# at every depth of the checkout, not only at its root. The root CLAUDE.md is
+# moved aside by the caller before this runs, because the reviewer still has
+# to read the head's copy. Removed from the checkout only; the diff was
+# written first, so it still carries every one of them.
+#
+# Names match whatever their case: on macOS's default case-insensitive file
+# system, a CLI that opens AGENTS.md opens agents.md. Nothing is followed
+# through a symbolic link: find without -L neither descends through one nor
+# reports what one points at, and rm removes a link it is given, never its
+# target. A link carrying one of these names is removed as a link, as the
+# root-only `rm -f` this replaced did. So is a link named .claude, .grok or
+# .cursor, since a CLI would read the rules directory under it through the
+# link; the real directories of those names stay, for the skills and
+# settings in them. A link such as .claude pointing at the operator's own
+# ~/.claude is never walked into, where `rm -rf "$root/.claude/rules"`
+# would have deleted the operator's rules.
+#
+# Then every other link goes too, whatever its name. A link in the head can
+# point at any directory on this machine - a relative one such as
+# `up -> ../../../../../../../..` reaches / knowing nothing about it - and
+# code/ is the directory the reviewers read: through the link they could
+# read, and quote into a posted review, whatever is there, and Grok would
+# load the AGENTS.md or CLAUDE.md it found. Nothing here rests on each CLI's
+# fence resolving a link before it checks a path. The diff records every
+# link and its target, so a reviewer loses nothing a link could show.
 strip_loaded_instructions() {
     local root="$1"
-    rm -f "$root/AGENTS.md" "$root/Agents.md" "$root/AGENT.md" \
-          "$root/Claude.md" "$root/CLAUDE.local.md" \
-          "$root/.claude/CLAUDE.md" "$root/.claude/CLAUDE.local.md"
-    rm -rf "$root/.claude/rules" "$root/.grok/rules" "$root/.cursor/rules"
+    find -P "$root" -mindepth 1 \
+        \( \( -type f -o -type l \) \
+           \( -iname AGENTS.md -o -iname AGENT.md -o -iname GEMINI.md \
+              -o -iname CLAUDE.md -o -iname CLAUDE.local.md \) \
+           -exec rm -f -- {} + \) \
+        -o \
+        \( \( -type d -o -type l \) \
+           \( -iname .agents -o -iname .agent -o -iname .gemini \
+              -o -ipath '*/.claude/rules' -o -ipath '*/.grok/rules' -o -ipath '*/.cursor/rules' \) \
+           -prune -exec rm -rf -- {} + \) \
+        -o \
+        \( -type l \( -iname .claude -o -iname .grok -o -iname .cursor \) \
+           -exec rm -f -- {} + \)
+    find -P "$root" -mindepth 1 -type l -exec rm -f -- {} +
 }
 
 BRIEF="$REPO_ROOT/.claude/skills/review/reviewer-brief.md"
@@ -430,20 +471,44 @@ fi
 for tool in gh jq; do
     command -v "$tool" >/dev/null 2>&1 || fail "$tool is not on PATH."
 done
+# gh is pinned to origin's repository before it is asked about any PR.
+# Left to itself, gh picks the repository from the remotes, and a clone of
+# a GitHub fork has an `upstream` remote beside origin (`gh repo clone
+# adeelabbas/gpr` adds one for gopro/gpr): there a bare `gh repo view`
+# answered gopro/gpr, and `gh pr view 11` gopro/gpr#11, checked on
+# 2026-09-23. So `/review 11 --post` from such a clone would have reviewed,
+# and commented on, GoPro's public pull request. `gh repo view` given
+# origin's url names origin's repository whatever the other remotes are (an
+# ssh url included), and GH_REPO, in host/owner/repo form, carries it to
+# every later `gh pr` and `gh run` call; an operator's own GH_REPO is
+# replaced the same way. The `gh api repos/$REPO/...` calls name the
+# repository themselves, but not its host: `gh api` ignores GH_REPO's and
+# goes to GH_HOST, else github.com (with GH_REPO=ghe.invalid/o/r, gh 2.95.0's
+# `gh api user` asked api.github.com, checked on 2026-09-23). So GH_HOST is
+# set to origin's host beside it, and every call reaches the same host.
+ORIGIN_URL="$(git remote get-url origin 2>/dev/null)" && [[ -n "$ORIGIN_URL" ]] ||
+    fail "this checkout has no origin remote, so there is no repository to review a pull request of;
+       add the one its pull requests are opened on: git remote add origin <url>"
+REPO_JSON="$(gh repo view "$ORIGIN_URL" --json nameWithOwner,url 2>/dev/null)" ||
+    fail "could not tell which GitHub repository origin is (gh repo view <origin's url> failed)."
+REPO="$(jq -r .nameWithOwner <<<"$REPO_JSON")"
+REPO_URL="$(jq -r .url <<<"$REPO_JSON")"
+[ -n "$REPO_URL" ] && [ "$REPO_URL" != null ] ||
+    fail "gh did not report origin's url."
+GH_REPO="${REPO_URL#*://}"
+[[ "$GH_REPO" =~ ^[^/]+/[^/]+/[^/]+$ ]] ||
+    fail "gh reported origin's url as $REPO_URL, which is not https://<host>/<owner>/<repo>."
+export GH_REPO
+export GH_HOST="${GH_REPO%%/*}"
 PR_JSON="$(gh pr view ${PR_ARG:+"$PR_ARG"} --json \
            number,title,url,body,state,baseRefName,headRefName,headRefOid 2>&1)" ||
     fail "no pull request for ${PR_ARG:-this branch}: $PR_JSON"
 field() { jq -r ".$1 // \"\"" <<<"$PR_JSON"; }
 N="$(field number)"
-# <pr> may be a URL, and gh follows one into whatever repository it names.
-# Every later call hands gh the bare number, which it takes to THIS checkout.
-# Reviewing over there and posting here would comment on a different PR.
-REPO_JSON="$(gh repo view --json nameWithOwner,url 2>/dev/null)" ||
-    fail "could not tell which GitHub repository this checkout is."
-REPO="$(jq -r .nameWithOwner <<<"$REPO_JSON")"
-REPO_URL="$(jq -r .url <<<"$REPO_JSON")"
-[ -n "$REPO_URL" ] && [ "$REPO_URL" != null ] ||
-    fail "gh did not report this repository's url."
+# <pr> may be a URL, and gh follows one into whatever repository it names,
+# GH_REPO or not. Every later call hands gh the bare number, which it takes
+# to origin's repository, pinned above. Reviewing over there and posting
+# here would comment on a different PR.
 case "$(field url)" in
     "$REPO_URL/pull/"*) ;;
     *)
@@ -476,10 +541,13 @@ if [[ "$MODE" == post ]]; then
     [[ -n "${GPR_REVIEW_NO_POST:-}" && "${GPR_REVIEW_NO_POST}" != 0 ]] && REHEARSAL=1
     SUMMARY=summary.md
     if [[ -n "$SUMMARY_ON_STDIN" ]]; then
-        # A rehearsal keeps the report in a file of its own: written over
-        # summary.md, it replaced the reconciled report and its credit, and a
-        # later --post without - posted the draft as "Reconciled by hand".
-        [[ -z "$REHEARSAL" ]] || SUMMARY=summary-draft.md
+        # The report waits in a file of its own: written over summary.md, it
+        # replaced the reconciled report and its credit, and a later --post
+        # without - posted the draft as "Reconciled by hand". A rehearsal
+        # leaves it there; a real run moves it over summary.md only once the
+        # comment is posted, below, so neither a refusal nor a post GitHub
+        # did not take replaces anything.
+        SUMMARY=summary-draft.md
         # Read whole and refused when empty before anything is written:
         # written straight over summary.md, an empty stdin wiped the
         # reconciled report and its credit, and was then refused as a
@@ -488,8 +556,6 @@ if [[ "$MODE" == post ]]; then
         [[ -n "$DRAFT" ]] ||
             fail "nothing came on stdin, so there is no report to post; $WORK/summary.md is as it was."
         printf '%s\n' "$DRAFT" > "$WORK/$SUMMARY" || fail "could not write $WORK/$SUMMARY"
-        # A report written by hand; the header must not credit the reconciler.
-        [[ -n "$REHEARSAL" ]] || rm -f "$WORK/reconciler.meta.json"
     fi
     [[ -s "$WORK/$SUMMARY" ]] ||
         fail "there is no $WORK/summary.md: the reconcile has not run or did not
@@ -551,8 +617,9 @@ for r in reviewers:
     r["finished"] = os.path.exists(os.path.join(work, f"review-{r['slug']}.md"))
     r["text"] = read(f"review-{r['slug']}.md")
 finished = [r for r in reviewers if r["finished"]]
-# A report from stdin credits no model, even in a rehearsal, which leaves
-# reconciler.meta.json in place.
+# A report from stdin credits no model. reconciler.meta.json is still there
+# when this runs: a real run removes it only once the comment is posted,
+# and a rehearsal never does.
 try:
     reconciler = {} if by_hand else json.load(open(os.path.join(work, "reconciler.meta.json")))
 except (OSError, ValueError):
@@ -627,9 +694,26 @@ if len(body) > 65536:
 json.dump({"body": body}, open(os.path.join(work, "comment.json"), "w"))
 PY
 
-    # Edited in place when an earlier run's comment is there, so one stands.
+    # Edited in place when an earlier run's comment is there, so one stands:
+    # the newest that starts with the marker AND was written by the gh user
+    # running this. On a public repository anyone can post a comment that
+    # starts with the marker, and anyone with write access - the operator,
+    # here - can edit another user's comment, so one found by the marker
+    # alone would be edited into this review under its author's name, or
+    # taken for this command's while the real one went stale. The user is
+    # asked once, after every refusal that needs no network, and a rehearsal
+    # asks too and names it. A checked login is safe inside the jq string.
+    # A listing that failed is not an empty one: read as none, it posted a
+    # second standing comment beside this command's own.
+    ME="$(gh api user --jq .login)" ||
+        fail "could not tell which GitHub user gh is logged in as (gh api user), so this
+       command's comment on #$N cannot be told from one anyone else posted; nothing was posted."
+    [[ "$ME" =~ ^[A-Za-z0-9][A-Za-z0-9-]*(\[bot\])?$ ]] ||
+        fail "gh api user answered '$ME', which is not a GitHub login; nothing was posted."
     EXISTING="$(gh api --paginate "repos/$REPO/issues/$N/comments" \
-                --jq ".[] | select(.body | startswith(\"$MARKER\")) | .id" | tail -n 1)"
+                --jq ".[] | select((.body | startswith(\"$MARKER\")) and .user.login == \"$ME\") | .id" |
+                tail -n 1)" ||
+        fail "could not list #$N's comments to find this command's earlier one; nothing was posted."
     # Asked before anything is posted, so a rehearsal reports the same answer
     # the real run would act on. When it cannot be had the label is left
     # alone: applying it blind is what cancels a pass already on the runner,
@@ -665,7 +749,7 @@ PY
         COMMENT_PLAN="post a new comment"
         [[ -n "$EXISTING" ]] && COMMENT_PLAN="edit comment $EXISTING"
         echo "  comment: $WORK/comment.json, $(jq -r '.body | length' "$WORK/comment.json") characters;" \
-             "would $COMMENT_PLAN on #$N"
+             "would $COMMENT_PLAN on #$N as $ME"
         case "$COVERAGE:$HAS_LABEL" in
             wanted:0)  echo "  label:   would add $LABEL, starting $WORKFLOW: $COVERAGE_WHY" ;;
             wanted:1)  echo "  label:   would remove and re-add $LABEL, starting $WORKFLOW: $COVERAGE_WHY" ;;
@@ -686,6 +770,13 @@ PY
             fail "could not comment on #$N."
     fi
     echo "comment: $URL"
+    # Posted: a report from stdin becomes summary.md, and the reconciler's
+    # credit goes, since the header must not credit it. Not before: a post
+    # GitHub did not take would have replaced both with nothing posted.
+    if [[ -n "$SUMMARY_ON_STDIN" ]]; then
+        mv -f "$WORK/summary-draft.md" "$WORK/summary.md" || fail "could not write $WORK/summary.md"
+        rm -f "$WORK/reconciler.meta.json"
+    fi
 
     # Every outcome is a `label:` line that reads on its own; /review passes it
     # on to the user as it stands.
@@ -733,18 +824,23 @@ fi
 for cli in "$CLAUDE" perl; do
     command -v "$cli" >/dev/null 2>&1 || fail "'$cli' is not on PATH."
 done
+# The seconds in a timeout setting, on stdout. Every caller adds || exit 1:
+# fail inside $(...) ends only the subshell, and a malformed setting went on
+# to be refused a second time, falsely, as not more than zero.
 timeout_seconds() {
     local spec="$1" name="$2"
     [[ "$spec" =~ ^([0-9]+)([smh]?)$ ]] ||
         fail "$name must be seconds, or end in s, m or h (e.g. 30m)."
+    # Base 10 whatever the digits start with: bash reads a leading 0 as
+    # octal, so 08m was an arithmetic error and 010m came to 480 s.
     case "${BASH_REMATCH[2]}" in
-        h) echo $(( BASH_REMATCH[1] * 3600 )) ;;
-        m) echo $(( BASH_REMATCH[1] * 60 )) ;;
-        *) echo $(( BASH_REMATCH[1] )) ;;
+        h) echo $(( 10#${BASH_REMATCH[1]} * 3600 )) ;;
+        m) echo $(( 10#${BASH_REMATCH[1]} * 60 )) ;;
+        *) echo $(( 10#${BASH_REMATCH[1]} )) ;;
     esac
 }
 # Zero would be no limit at all: alarm(0) cancels the alarm.
-RECONCILE_TIMEOUT_S="$(timeout_seconds "$RECONCILE_TIMEOUT" GPR_REVIEW_RECONCILE_TIMEOUT)"
+RECONCILE_TIMEOUT_S="$(timeout_seconds "$RECONCILE_TIMEOUT" GPR_REVIEW_RECONCILE_TIMEOUT)" || exit 1
 (( RECONCILE_TIMEOUT_S > 0 )) || fail "GPR_REVIEW_RECONCILE_TIMEOUT must be more than zero."
 [[ -r "$RECONCILER_BRIEF" ]] || fail "there is no reconciler brief at $RECONCILER_BRIEF."
 
@@ -813,7 +909,7 @@ PY
 # cleanly, on the model asked for, and the text ends with END OF REPORT.
 settle_reconcile() {
     python3 - "$WORK" "$1" "$2" "$3" "$RECONCILE_EFFORT" "$RECONCILE_TIMEOUT" <<'PY'
-import json, os, sys
+import json, os, re, sys
 work, tag, model, from_model, effort, limit = sys.argv[1:7]
 END = "END OF REPORT"
 def slurp(name):
@@ -850,6 +946,14 @@ if problems:
     print(f"  reconcile: FAILED - {'; '.join(problems)}", file=sys.stderr)
     print(f"  Its record is {os.path.join(work, 'reconcile-' + tag + '-stream.jsonl')}.", file=sys.stderr)
     sys.exit(1)
+# The brief asks for no preamble, and still the reply on gpraw/gpr#43 opened
+# with a line of narration ("I'm writing up the reconciled report now.")
+# that landed in summary.md and the posted comment. So the report is kept
+# from its first "### " heading on: the brief's report opens with one, its
+# Did not finish section when a reviewer did not, else its Blocking section.
+first = re.search(r"^### ", text, re.M)
+if first:
+    text = text[first.start():]
 open(os.path.join(work, "summary.md"), "w", encoding="utf-8").write(text[: -len(END)].rstrip() + "\n")
 json.dump({"model": ran_on, "effort": effort, "fallback_from": from_model or None},
           open(os.path.join(work, "reconciler.meta.json"), "w"))
@@ -924,14 +1028,17 @@ $(awk '{ print "         " $2 ":" $3 }' "$WORK/reviewers")"
 else
     RUN_LINES="$REVIEWER_LINES"
 fi
-# Zero would be no limit at all: alarm(0) cancels the alarm.
+# Zero would be no limit at all: alarm(0) cancels the alarm, and agy's
+# --print-timeout 0 waits forever. agy is handed the setting as written
+# (30m), so for Gemini the seconds only settle that it is more than zero.
 for cli in $(awk '{ print $2 }' <<<"$RUN_LINES" | sort -u); do
     case "$cli" in
-        claude) CLAUDE_TIMEOUT_S="$(timeout_seconds "$CLAUDE_TIMEOUT" GPR_REVIEW_CLAUDE_TIMEOUT)"
+        claude) CLAUDE_TIMEOUT_S="$(timeout_seconds "$CLAUDE_TIMEOUT" GPR_REVIEW_CLAUDE_TIMEOUT)" || exit 1
                 (( CLAUDE_TIMEOUT_S > 0 )) || fail "GPR_REVIEW_CLAUDE_TIMEOUT must be more than zero." ;;
-        grok)   GROK_TIMEOUT_S="$(timeout_seconds "$GROK_TIMEOUT" GPR_REVIEW_GROK_TIMEOUT)"
+        grok)   GROK_TIMEOUT_S="$(timeout_seconds "$GROK_TIMEOUT" GPR_REVIEW_GROK_TIMEOUT)" || exit 1
                 (( GROK_TIMEOUT_S > 0 )) || fail "GPR_REVIEW_GROK_TIMEOUT must be more than zero." ;;
-        gemini) timeout_seconds "$GEMINI_TIMEOUT" GPR_REVIEW_GEMINI_TIMEOUT >/dev/null ;;
+        gemini) GEMINI_TIMEOUT_S="$(timeout_seconds "$GEMINI_TIMEOUT" GPR_REVIEW_GEMINI_TIMEOUT)" || exit 1
+                (( GEMINI_TIMEOUT_S > 0 )) || fail "GPR_REVIEW_GEMINI_TIMEOUT must be more than zero." ;;
     esac
 done
 [[ -r "$BRIEF" ]] || fail "there is no reviewer brief at $BRIEF."
@@ -996,11 +1103,15 @@ else
     # Grok loads a CLAUDE.md, AGENTS.md, or rules directory when it reads the
     # folder that holds it, and a deeper file overrides the one from startup.
     # The nested git init below only stops the walk upward. The head checkout
-    # is full of the PR's own copies, so those are lifted out after the diff
-    # is written: the diff still shows the edit, and the file a reviewer reads
-    # is head-CLAUDE.md, a name Grok does not treat as instructions.
+    # is full of the PR's own copies, at any depth, so those are lifted out
+    # after the diff is written (strip_loaded_instructions): the diff still
+    # shows the edit, and the file a reviewer reads is head-CLAUDE.md, a name
+    # none of the three CLIs treats as instructions.
     # No --trust, so this directory is not granted the project's skills or hooks.
-    if [[ -f "$CODE/CLAUDE.md" ]]; then
+    # Only a regular file is moved. A link would move as a link, and
+    # head-CLAUDE.md would then read as whatever it points at, anywhere on
+    # this machine; strip_loaded_instructions removes one instead.
+    if [[ -f "$CODE/CLAUDE.md" && ! -L "$CODE/CLAUDE.md" ]]; then
         mv "$CODE/CLAUDE.md" "$INPUT/head-CLAUDE.md" ||
             fail "could not move the head's CLAUDE.md out of the checkout."
     fi
@@ -1033,8 +1144,15 @@ checks_plan() {
     python3 - "$INPUT/diff.patch" <<'PY'
 import re, sys
 scripts = []
+# Only a file's own header names it: a hunk line that begins "++ b/" prints
+# as "+++ b/...", and would name any path, ".." included.
+header = False
 for line in open(sys.argv[1], encoding="utf-8", errors="replace"):
-    if not line.startswith("+++ "):
+    if line.startswith("diff --git "):
+        header = True
+    elif line.startswith("@@"):
+        header = False
+    if not header or not line.startswith("+++ "):
         continue
     target = line[4:].strip()
     path = target[2:] if target.startswith("b/") else None
@@ -1047,7 +1165,7 @@ PY
 
 # input/checks.md: what checks_plan asked for, and what running it said.
 write_checks() {
-    local plan kind a
+    local plan kind a mode
     plan="$(checks_plan)" || return 1
     echo "# Checks run before the review"
     echo ""
@@ -1059,7 +1177,21 @@ write_checks() {
     grep -q '^script ' <<<"$plan" || echo "None."
     while read -r kind a; do
         [[ "$kind" == script ]] || continue
-        if [[ ! -f "$CODE/$a" ]]; then
+        # What the head holds at the path, as git records it (120000 a link,
+        # 100644 or 100755 a file). The checkout alone cannot say: by now
+        # strip_loaded_instructions has taken every link out of it, and every
+        # file in the directories it removes (.agents, .gemini, the rules
+        # directories), so a path missing there may be in the head all the same.
+        mode="$(git -C "$CODE" ls-tree HEAD -- "$a" 2>/dev/null)"
+        mode="${mode%% *}"
+        # A link is not parsed: `bash -n` and the Python parser both follow
+        # it, and would read - and quote in an error - whatever it points at,
+        # anywhere on this machine. Tested first, since -f follows it too.
+        if [[ -L "$CODE/$a" || "$mode" == 120000 ]]; then
+            echo "- \`$a\`: a symbolic link in the head, so it was not parsed; the diff shows where it points."
+        elif [[ ! -f "$CODE/$a" && "$mode" == 100* ]]; then
+            echo "- \`$a\`: taken out of the checkout with the instruction files the CLIs would load, so it was not parsed; the diff shows it."
+        elif [[ ! -f "$CODE/$a" ]]; then
             echo "- \`$a\`: not in the head checkout."
         elif [[ "$a" == *.sh ]]; then
             if err="$(bash -n "$CODE/$a" 2>&1)"; then
@@ -1173,12 +1305,21 @@ run_grok() {
 #   - When --print-timeout expires it returns what it has, exits 0, and says
 #     so only on stderr ("[agy] print timeout ... returning partial output").
 #   - The effort is part of the model name; there is no separate flag to set.
+# agy 1.2.9 adds --sandbox, --mode and --disable-slash-commands. The run
+# takes --sandbox, agy's own fence behind the refusals above, and
+# --disable-slash-commands, so that nothing in the prompt, which carries the
+# PR's own title, expands as a command. Not --mode plan: measured on
+# 2026-09-23, a one-file read with --sandbox --disable-slash-commands
+# answered correctly at once, and the same run with --mode plan added
+# returned nothing until its 90 s print timeout, agy warning that "--mode
+# plan has no effect while slash command expansion is disabled".
 run_gemini() {
     local slug="$1" model="$2" prompt refused attempt
     prompt="$(cat "$WORK/prompt.md")"
     for attempt in 1 2; do
         (cd "$INPUT" && "$AGY" --model "$model" --output-format json \
-             --print-timeout "$GEMINI_TIMEOUT" --add-dir "$INPUT" -p "$prompt" < /dev/null) \
+             --print-timeout "$GEMINI_TIMEOUT" --add-dir "$INPUT" \
+             --sandbox --disable-slash-commands -p "$prompt" < /dev/null) \
             > "$WORK/$slug-run.json" 2> "$WORK/$slug-stderr.log"
         refused="$(jq -r '[.denied_actions[]?.display_name] | unique | join(", ")' \
                    "$WORK/$slug-run.json" 2>/dev/null)"

@@ -20,7 +20,10 @@ The reviews that finished, each by the model that wrote it:
 - `@WORK@/input/pr.md`, `@WORK@/input/diff.patch`,
   `@WORK@/input/commits.md` - the pull request, its diff and its commits.
 - `@WORK@/input/code/` - the repository at the head commit. Every review
-  cites lines as it appears here.
+  cites lines as it appears here. The
+  instruction files the CLIs load and every symbolic link are taken out of
+  it; `input/diff.patch` carries them, so check a finding on one of those
+  paths against the diff rather than refuting it for being absent.
 - `@WORK@/input/checks.md` - what the script established by running things
   before the reviews: whether each changed shell or Python file parses.
   Settle a finding or an open question from it rather than by reading.
@@ -79,15 +82,19 @@ in *<name> only* or *<name> and <name>*.
 - If checking turns up a real defect that no review found, put it under
   its own heading, attributed to no reviewer.
 
-When a reviewer did not finish, say so at the top of the report, naming it,
-and reconcile the reviews that did. When only one finished, reconcile that
-one alone and verify its blocking findings the same way.
+When a reviewer did not finish, open the report with a `### Did not finish`
+section that names it, and reconcile the reviews that did. When only one
+finished, reconcile that one alone and verify its blocking findings the
+same way.
 
 ## The report
 
 GitHub Markdown, plain ASCII, in this shape:
 
 ```
+### Did not finish
+<only when a reviewer did not: which, and why>
+
 ### Blocking
 1. **<the defect>** - `path/from/root:line` - <the failure, in one sentence>. *all, confirmed:* <what you looked for that would stop it, and did not find>
 2. **<the defect>** - `path:line` - <failure>. *<one reviewer's name> only, confirmed:* <what proves it>

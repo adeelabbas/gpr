@@ -3,7 +3,7 @@ name: next
 description: Say what has to be done next, in order, from the whole context - this conversation, the working tree, the branch's pull request and its CI, the other open pull requests, and what CLAUDE.md says is owed to the repositories this one is kept in sync with. Reads only; runs no step itself. Only when the user types /next.
 argument-hint: "[focus, optional - e.g. a PR number, 'sync', or a question]"
 disable-model-invocation: true
-allowed-tools: Bash(git branch --show-current), Bash(git symbolic-ref --short refs/remotes/origin/HEAD), Bash(git fetch origin master), Bash(git fetch origin main), Bash(git fetch --quiet https://github.com/gopro/gpr.git master), Bash(git merge-base *)
+allowed-tools: Bash(git branch --show-current), Bash(git remote get-url origin), Bash(git symbolic-ref --short refs/remotes/origin/HEAD), Bash(git fetch origin master), Bash(git fetch origin main), Bash(git fetch origin), Bash(git fetch --quiet https://github.com/gopro/gpr.git master), Bash(git merge-base *), Bash(git cherry *)
 ---
 
 # What comes next
@@ -60,13 +60,30 @@ is kept in sync with, and whether it makes a section of README.md a
 contract. Find both by heading, never by number; the two gpr repositories
 number their CLAUDE.md sections differently.
 
+**This repository, and who is asking**
+
+- `git remote get-url origin` prints `git@github.com:<owner>/<repo>.git`
+  or `https://github.com/<owner>/<repo>.git`; `<owner>/<repo>` below is
+  that pair without `.git` (`<host>/<owner>/<repo>` when the host is not
+  github.com). Every `gh` command on this repository names it with `-R`,
+  because in a clone of a fork a bare `gh` resolves to the fork's parent:
+  from a `gh repo clone adeelabbas/gpr` checkout, which adds gopro/gpr as
+  `upstream`, `gh pr view 11` reads gopro/gpr#11. With `-R`, `gh pr view`
+  and `gh pr checks` need the pull request named, by number or branch.
+- `gh auth status` lists every account `gh` knows, host by host, and
+  marks one per host `Active account: true`. `<login>` below is the one
+  marked active under origin's host (github.com, unless origin's url
+  names another), not simply the first listed: it is the account `gh`
+  acts as there, and so the one `scripts/review_pr.sh` posts as. It
+  decides which `/review` comment is the operator's.
+
 **Default branch and workflows**
 
 - `git symbolic-ref --short refs/remotes/origin/HEAD` prints
   `origin/<default>`: `origin/master` in adeelabbas/gpr, `origin/main` in
   gpraw/gpr. In a clone where `origin/HEAD` was never set it fails; then
-  `gh repo view --json defaultBranchRef --jq .defaultBranchRef.name`.
-  `<default>` below is that name.
+  `gh repo view <owner>/<repo> --json defaultBranchRef --jq
+  .defaultBranchRef.name`. `<default>` below is that name.
 - Which of `build-flags.yml`, `claude-review.yml` and
   `claude-test-gap-check.yml` this repository has is a listing of
   `.github/workflows/`; read it with the file tools. gpraw/gpr has all
@@ -90,28 +107,33 @@ number their CLAUDE.md sections differently.
   working here. It also prints each checkout's commit, which is what to
   compare with the PR's `headRefOid` below.
 
-**This branch's pull request**, when there is one:
+**This branch's pull request**, when there is one, found by the branch's
+name (`<branch>`, from `git branch --show-current`), or the one
+`$ARGUMENTS` names by number:
 
-    gh pr view --json number,title,url,state,isDraft,baseRefName,headRefOid,mergeable,mergeStateStatus,statusCheckRollup,labels,files,comments,body
+    gh pr view <branch> -R <owner>/<repo> --json number,title,url,state,isDraft,baseRefName,headRefOid,mergeable,mergeStateStatus,statusCheckRollup,labels,files,comments,body
+
+`<n>` below is its number.
 
 - **CI**: the gate is `.github/workflows/build-flags.yml`, the flag
   matrix: every check in `statusCheckRollup` whose `workflowName` is that
   workflow's `name:`. The job names differ between the two repositories,
-  so read them there rather than expecting any. `gh pr checks <n>
-  --required` names the ones branch protection requires; it exits non-zero
-  when there are none, when one failed, and while one is pending, so read
-  what it prints. `/merge` merges only on `CLEAN` (or `HAS_HOOKS`): a
-  required check that failed or is still pending makes it `BLOCKED`, and
-  any other check that has not passed makes it `UNSTABLE`. For a failure,
-  `gh run view <id> --log-failed` shows why; read it before recommending a
-  fix.
-- **A matrix that never starts**: it runs only on the paths its `paths:`
-  list watches, since nothing else can break a flag configuration. Where
-  no check is required, a PR that touches none of them has no matrix check
-  at all, and that is neither a failure nor a wait. Where one is required,
-  such a PR never gets it and sits `BLOCKED` for good - the workflow's
-  comment on its paths says what that took before - so that is a decision
-  for the operator, not something to wait out.
+  so read them there rather than expecting any. `gh pr checks <n> -R
+  <owner>/<repo> --required` names the ones branch protection requires; it
+  exits non-zero when there are none, when one failed, and while one is
+  pending, so read what it prints. `/merge` merges only on `CLEAN` (or
+  `HAS_HOOKS`): a required check that failed or is still pending makes it
+  `BLOCKED`, and any other check that has not passed makes it `UNSTABLE`.
+  For a failure, `gh run view <id> -R <owner>/<repo> --log-failed` shows
+  why; read it before recommending a fix.
+- **A matrix that never starts**: read the workflow's trigger, its `on:`.
+  Where that has a `paths:` list, the matrix runs only on those paths,
+  since nothing else can break a flag configuration. Where no check is
+  required, a PR that touches none of them has no matrix check at all,
+  and that is neither a failure nor a wait. Where one is required, such a
+  PR never gets it and sits `BLOCKED` for good - the workflow's comment on
+  its paths says what that took before - so that is a decision for the
+  operator, not something to wait out.
 - **Divergence**: when `headRefOid` is not this checkout's commit, the two
   have moved apart. A head ahead of the checkout, typically a case the
   test-gap pass committed, means pulling it (`git pull --ff-only`) is the
@@ -120,24 +142,31 @@ number their CLAUDE.md sections differently.
 - **Test gap**: only where the repository has
   `claude-test-gap-check.yml` (gpraw/gpr). Its result is the one comment
   whose body starts with `<!-- gpr-claude-test-gap -->`; a comment that
-  only quotes the marker is not a result. Its check is `test-check`, and it
-  runs only when the PR touches C or C++ sources, a `CMakeLists.txt` or
-  `.claude/skills/coverage/brief.md`. If the PR's `files` include
-  `.github/workflows/claude-test-gap-check.yml`, no comment will come and a
-  green check means nothing: the action skips itself on a PR that edits its
-  own workflow. `/review` settles the `needs-coverage` label, so do not
-  recommend it by hand. `test-check` skipped on a commit the pass pushed
+  only quotes the marker is not a result. Its check is that workflow's
+  job, named under `jobs:` in the file, and which PRs it runs on is its
+  trigger's to say (`on:`, with any `paths:` list); read both there rather
+  than expecting any. If the PR's `files` include
+  `.github/workflows/claude-test-gap-check.yml`, no comment will come and
+  a green check means nothing: the action skips itself on a PR that edits
+  its own workflow. `/review` settles the `needs-coverage` label, so do
+  not recommend it by hand. That check skipped on a commit the pass pushed
   itself is expected; the run that pushed it already said what it covers.
   Where the repository has no such workflow (adeelabbas/gpr) there is
   nothing to wait for: `/coverage` is the only test-gap pass a change gets
   there.
 - **CI's review**: only where `claude-review.yml` exists (gpraw/gpr). Its
-  check is `review` and its comment starts with `<!-- gpr-claude-review -->`,
-  and it skips itself the same way on a PR that edits its own workflow. It
-  is one model's read of the diff, with nothing that tries to refute it, so
-  it does not stand in for `/review`. Name a blocking finding it raises;
-  the `/review` comment is still the one the merge waits on.
-- **Review**: the `/review` comment starts with `<!-- gpr-dual-review -->`.
+  check is that workflow's job, named under `jobs:` in the file, its
+  comment starts with `<!-- gpr-claude-review -->`, and it skips itself the
+  same way on a PR that edits its own workflow. It is one model's read of
+  the diff, with nothing that tries to refute it, so it does not stand in
+  for `/review`. Name a blocking finding it raises; the `/review` comment
+  is still the one the merge waits on.
+- **Review**: the `/review` comment is the newest one whose body starts
+  with `<!-- gpr-dual-review -->` and whose `author.login` is `<login>`.
+  Trust no other: on a public repository anyone can post a comment that
+  starts with the marker, which is why `scripts/review_pr.sh` edits only
+  its own user's comment too. Say whose it is when you cite it, and name
+  one by another account, with its author, as not taken for a review.
   Its heading, "Review of `<sha>` by N models", names the reviewed commit by
   its first seven characters, so compare that prefix with `headRefOid`, not
   the whole sha. When the head moved while the review ran, the script has
@@ -150,12 +179,60 @@ number their CLAUDE.md sections differently.
   (`BEHIND`, `BLOCKED`, `DIRTY`, `UNSTABLE`), a draft, or a base other than the
   default branch each stop `/merge`.
 
-**Everything else open**
+**Everything else open**, and what merged lately
 
-    gh pr list --state open --json number,title,headRefName,baseRefName,isDraft,updatedAt
+    gh pr list -R <owner>/<repo> --state open --json number,title,headRefName,headRefOid,baseRefName,isDraft,updatedAt
+    gh pr list -R <owner>/<repo> --state merged --limit 10 --json number,title,headRefName,headRefOid,mergedAt,files
 
 - PRs stacked on this branch (base is this branch) land after it; `/merge`
   retargets them to the default branch once this one is in.
+- **A stacked PR `/merge` retargeted** still carries the merged PR's
+  original commits, while the default branch has their squash or their
+  rebased copies. GitHub reports that as `BEHIND` or `DIRTY` only where
+  branch protection or a conflict says so; where neither does, the PR
+  looks mergeable, and merging it can land the old commits a second time.
+  So check every open PR into the default branch whose branch is on
+  origin, this branch's own included. Fetch origin's branches once,
+  `git fetch origin`, then for each:
+
+      git cherry origin/<default> origin/<its branch>
+
+  It prints, oldest first and as full shas, every commit of the branch
+  that the default branch does not have itself. A line starting with `-`
+  is one whose change the default branch already has under another sha:
+  a rebase-merged copy, or the squash of a one-commit PR. A squash of
+  several commits matches none of them, and `git cherry` marks them all
+  `+` (measured on a two-commit PR: `-` for both after a rebase merge, `+`
+  for both after a squash). So the other sign is a line, of either mark,
+  whose sha is the `headRefOid` of a PR in the merged list above. Either
+  sign means the PR needs, before its `/review` and its `/merge`, in a
+  checkout with nothing uncommitted:
+
+      git switch <its branch>
+      git merge --ff-only origin/<its branch>
+      git rebase --onto origin/<default> <merged PR's head> <its branch>
+      git push --force-with-lease=refs/heads/<its branch>:<its head> origin <its branch>
+
+  `<merged PR's head>` is that `headRefOid`, or, with only `-` lines to go
+  on, the last of them; `<its head>` is the open PR's own `headRefOid`.
+  The first two lines make the local branch the one `git cherry` read,
+  origin's. `git switch` creates it from origin's where there is none,
+  the usual case for another session's branch, where the rebase alone
+  stops (`fatal: no such branch/commit`); it refuses where another
+  worktree has the branch checked out, which is then where to run these.
+  `git merge --ff-only` catches up a local copy that is behind, and stops
+  where the two have diverged, which is the user's to settle. The lease
+  names the sha because a bare `--force-with-lease` leases on
+  `origin/<its branch>`, which every fetch moves, the one above and an
+  editor's background one alike. Measured in scratch repositories, with a
+  commit pushed to the branch from another clone: over a stale local copy
+  the rebase and a bare-leased push both exited 0 and origin's branch lost
+  that commit, and with the two lines first it was kept; landing after
+  this read and fetched before the push, it was lost to the bare lease,
+  and the named sha refused the push instead. The rebase replays only the
+  PR's own commits onto the default branch, and the push replaces
+  origin's copy. All four are the user's to run, not this skill's and not
+  a routine's: recommend them, with the lines that showed it.
 - Where branch protection requires up-to-date branches (a `BEHIND` above
   says so), several ready PRs land one at a time, each catching up to the
   default branch and rerunning the matrix before its merge.
@@ -169,14 +246,10 @@ repositories, can leave owing is a step. In adeelabbas/gpr it does both
 (`The three repositories, and keeping them in sync`, and `README.md: the
 "About this fork" section is the contract`), and they owe four things:
 
-- **A merged change owes its cherry-pick downstream.** List what merged
-  here:
-
-      gh pr list --state merged --limit 10 --json number,title,mergedAt,files
-
-  Leave out a PR whose files are only README.md, CLAUDE.md or under
-  `.github/`; those edits stay here by the same rule. For the rest, newest
-  merge first, look for each in gpraw/gpr by title:
+- **A merged change owes its cherry-pick downstream.** What merged here
+  is the merged list above. Leave out a PR whose files are only README.md,
+  CLAUDE.md or under `.github/`; those edits stay here by the same rule.
+  For the rest, newest merge first, look for each in gpraw/gpr by title:
 
       gh pr list -R gpraw/gpr --state all --search "<title> in:title" --json number,title,state
 
@@ -191,10 +264,10 @@ repositories, can leave owing is a step. In adeelabbas/gpr it does both
   cherry-pick those that are not only README.md, CLAUDE.md or `.github/`
   edits - the selection `/pr` makes in its carry-across step - then `/pr`
   there. They are taken from the PR rather than from `<default>` so the
-  step is the same however `/merge` merged it: a rebase merge puts each
-  commit on `<default>` as it was, but a squash would fold the README edit
-  into the code. gpraw/gpr is private; when `gh` cannot read it, say so and
-  leave this unchecked.
+  step is the same however the PR merged: `/merge --rebase` puts each
+  commit on `<default>` as it was, but `--squash` would fold the README
+  edit into the code. gpraw/gpr is private; when `gh` cannot read it, say
+  so and leave this unchecked.
 - **A change downstream can be owed here.** CLAUDE.md's "Borrow from
   downstream" rule: what merged in gpraw/gpr and applies to writing GPR
   files (the encoder, the DNG writer, their robustness, their tests)
@@ -202,10 +275,13 @@ repositories, can leave owing is a step. In adeelabbas/gpr it does both
 
       gh pr list -R gpraw/gpr --state merged --limit 10 --json number,title,mergedAt,files
 
-  and look for each here by title, the same way as above. One not found
-  here is a decision for the operator, not a step: whether it is about
-  writing files, rather than decoder-only work CLAUDE.md keeps out, is
-  theirs to say. Name it, with its files.
+  and look for each here by title, the same way as above:
+
+      gh pr list -R <owner>/<repo> --state all --search "<title> in:title" --json number,title,state
+
+  One not found here is a decision for the operator, not a step: whether
+  it is about writing files, rather than decoder-only work CLAUDE.md keeps
+  out, is theirs to say. Name it, with its files.
 - **Upstream moving owes a merge here first.** Read upstream from its own
   URL: `git fetch --quiet https://github.com/gopro/gpr.git master`, then,
   before any other fetch rewrites `FETCH_HEAD`,
@@ -243,6 +319,10 @@ Put the steps in dependency order, the way CLAUDE.md's routines do:
          -> carry across (cherry-pick downstream, merge upstream)
 
 - Something failing or blocking comes before something new.
+- A retargeted stacked PR that still carries a merged PR's commits is
+  rebased first, by the user, before anything else on it: its `/review`
+  would read the merged PR's changes as its own, and its merge could land
+  them again.
 - Waiting on CI is a state, not a step: say what is running and what to do
   once it finishes. Do not recommend polling.
 - A cherry-pick owed downstream is a step once its PR has merged here. An
