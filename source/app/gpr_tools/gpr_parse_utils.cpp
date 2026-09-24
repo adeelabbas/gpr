@@ -32,6 +32,19 @@ void parse_gps_info( cJSON* pGpsInfo, gpr_gps_info& exif_info )
     exif_info.gps_info_valid = false;
 }
 
+// Reads a date as gpr_parameters_print_json writes it, "Y-M-D h:m:s" without zero padding.
+// An empty string, or anything that does not scan as six numbers, is left all zero: the DNG
+// SDK treats that as an invalid date and the writer leaves the tag out, the honest way to say
+// "unknown".
+static void parse_date_and_time( cJSON* pJSON, gpr_date_and_time& x )
+{
+    if( pJSON->valuestring == NULL ||
+        sscanf( pJSON->valuestring, "%u-%u-%u %u:%u:%u", &x.year, &x.month, &x.day, &x.hour, &x.minute, &x.second ) != 6 )
+    {
+        memset( &x, 0, sizeof(x) );
+    }
+}
+
 void parse_exif_info( cJSON* pExifInfo, gpr_exif_info& exif_info )
 {
     cJSON* pJSON = pExifInfo->child;
@@ -72,10 +85,10 @@ void parse_exif_info( cJSON* pExifInfo, gpr_exif_info& exif_info )
     exif_info.iso_speed_rating = pJSON->valueint;
     pJSON = pJSON->next;
     
-//    strcpy( exif_info.date_time_original, pJSON->valuestring );
+    parse_date_and_time( pJSON, exif_info.date_time_original );
     pJSON = pJSON->next;
     
-//    strcpy( exif_info.date_time_digitized, pJSON->valuestring );
+    parse_date_and_time( pJSON, exif_info.date_time_digitized );
     pJSON = pJSON->next;
     
     exif_info.exposure_bias.numerator   = pJSON->child->valueint;
