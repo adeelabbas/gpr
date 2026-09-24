@@ -254,6 +254,32 @@ static bool tiff_entry_bytes( const unsigned char* d, size_t n, size_t entry, bo
     return true;
 }
 
+// Reads an ASCII tag from IFD0 or from the Exif IFD it points to (ExifIFD, 34665), straight
+// from the bytes: the independent ground truth for the capture dates. Returns false when the
+// tag is absent.
+static bool tiff_find_ascii_tag( const gpr_buffer& buf, unsigned int want, std::string& value )
+{
+    if( !buf.buffer || buf.size < 8 ) return false;
+    const unsigned char* d = (const unsigned char*)buf.buffer;
+    const bool le = ( d[0] == 'I' );
+
+    const size_t ifd0 = tiff_u32( d + 4, le );
+    const size_t exif = tiff_find_entry( d, buf.size, ifd0, 34665 /* ExifIFD */, le );
+    const size_t ifds[2] = { ifd0, exif ? tiff_u32( d + exif + 8, le ) : 0 };
+
+    for( int i = 0; i < 2; ++i )
+    {
+        const size_t entry = tiff_find_entry( d, buf.size, ifds[i], want, le );
+        std::string bytes;
+        if( entry && tiff_u16( d + entry + 2, le ) == 2 /* ASCII */ && tiff_entry_bytes( d, buf.size, entry, le, bytes ) )
+        {
+            value = bytes.c_str();   // the count includes the NUL
+            return true;
+        }
+    }
+    return false;
+}
+
 // Returns true if any IFD (including SubIFDs) sets Compression (259) to ccVc5 (9).
 // An independent ground truth (reads the TIFF tag directly) that the test cross-checks
 // against the public gpr_check_vc5() at every call site. vc5_size receives that IFD's
@@ -2406,6 +2432,144 @@ static void run_exif_string_cli_tests()
 }
 
 // ---------------------------------------------------------------------------
+// gpr_tools --apply_metadata (dng_convert_main)
+//
+// Applies a JSON written by gpr_parameters_print_json (what gpr_tools -d
+// prints) to a RAW input. The capture dates must reach the output's Exif tags;
+// an empty or all-zero date means unknown and leaves the tags out. Uses the
+// sample run_preview_cli_tests loaded (g_cli_sample), so it runs after it.
+// ---------------------------------------------------------------------------
+
+// Different from each other and from gpr_exif_info_set_defaults' 2016-03-25 15:55:23, so each
+// tag's source is unambiguous; the one-digit second exercises the printer's unpadded form.
+static const gpr_date_and_time g_date_original  = { 2026, 6, 26, 21, 40, 15 };
+static const gpr_date_and_time g_date_digitized = { 2026, 6, 26, 21, 41, 2 };
+
+// The CLI sample's metadata with the given capture dates, written as gpr_tools -d writes it.
+static bool write_metadata_json( const std::string& path, const gpr_date_and_time& original,
+                                 const gpr_date_and_time& digitized )
+{
+    gpr_parameters params;
+    gpr_parameters_set_defaults( &params );
+    if( !gpr_parameters_parse_dng_file( &g_alloc, g_cli_sample.c_str(), &params ) )
+        return false;
+
+    params.exif_info.date_time_original  = original;
+    params.exif_info.date_time_digitized = digitized;
+    gpr_parameters_print_json( &params, path.c_str() );
+    gpr_parameters_destroy( &params, g_alloc.Free );
+
+    Buffer json;
+    return load_file( path.c_str(), json );
+}
+
+// raw -> out with --apply_metadata=json; out is loaded into o and removed.
+static bool convert_raw_with_metadata( const std::string& raw, const std::string& json,
+                                       const std::string& out, Buffer& o )
+{
+    dng_convert_params p = preview_cli_params( raw.c_str(), out.c_str(), "" );
+    p.metadata_file_path = json.c_str();
+    const bool converted = dng_convert_main( &p ) == 0;
+    const bool loaded    = load_file( out.c_str(), o );
+    std::remove( out.c_str() );
+    return converted && loaded;
+}
+
+static void run_metadata_cli_tests()
+{
+    std::fprintf( stdout, "\n== gpr_tools --apply_metadata (dng_convert_main) ==\n" );
+
+    if( g_cli_sample.empty() )
+    {
+        run_case( "--apply_metadata: CLI sample", []{ check( false, "run_preview_cli_tests must run first (no CLI sample loaded)" ); } );
+        return;
+    }
+
+    run_case( "--apply_metadata: capture dates reach DNG and GPR output", []{
+        const std::string json = scratch_path( "dates.json" );
+        const std::string raw  = scratch_path( "dates.RAW" );
+        check( write_metadata_json( json, g_date_original, g_date_digitized ), "metadata json written" );
+
+        dng_convert_params pr = preview_cli_params( g_cli_sample.c_str(), raw.c_str(), "" );
+        check( dng_convert_main( &pr ) == 0, "GPR -> RAW succeeds" );
+
+        const char* outputs[] = { "dates.DNG", "dates.GPR" };
+        for( int i = 0; i < 2; ++i )
+        {
+            Buffer o;
+            const bool converted = convert_raw_with_metadata( raw, json, scratch_path( outputs[i] ), o );
+            check( converted, "RAW -> output with metadata succeeds" );
+            if( !converted ) continue;
+
+            validate_dng_like( o, g_cli_W, g_cli_H, /*vc5=*/ i == 1 );
+
+            std::string s;
+            check( tiff_find_ascii_tag( o.b, 36867, s ) && s == "2026:06:26 21:40:15",
+                   "DateTimeOriginal is the json's date_time_original" );
+            check( tiff_find_ascii_tag( o.b, 36868, s ) && s == "2026:06:26 21:41:02",
+                   "DateTimeDigitized is the json's date_time_digitized" );
+            check( tiff_find_ascii_tag( o.b, 306, s ) && s == "2026:06:26 21:40:15",
+                   "DateTime is the json's date_time_original" );
+
+            // The SDK's reader agrees with the tag. It fills date_time_digitized from
+            // DateTimeOriginal as well, so only the original is cross-checked.
+            gpr_parameters params;
+            gpr_parameters_set_defaults( &params );
+            check( gpr_parameters_parse_dng( &g_alloc, &o.b, &params ) &&
+                   std::memcmp( &params.exif_info.date_time_original, &g_date_original, sizeof(g_date_original) ) == 0,
+                   "gpr_parameters_parse_dng reads the same date_time_original" );
+            gpr_parameters_destroy( &params, g_alloc.Free );
+        }
+        std::remove( raw.c_str() );
+        std::remove( json.c_str() );
+    });
+
+    // All zeros is what the printer writes for an unknown date ("0-0-0 0:0:0"); an empty string
+    // says the same in a hand-edited json. Neither is a valid date, so the writer leaves the tags
+    // out rather than inventing one, and the two must write the same file.
+    run_case( "--apply_metadata: an empty or all-zero date writes no date tags", []{
+        const gpr_date_and_time zero = { 0, 0, 0, 0, 0, 0 };
+        const std::string zero_json  = scratch_path( "dates_zero.json" );
+        const std::string empty_json = scratch_path( "dates_empty.json" );
+        const std::string raw        = scratch_path( "dates_unknown.RAW" );
+        check( write_metadata_json( zero_json, zero, zero ), "all-zero json written" );
+        check( write_metadata_json( empty_json, g_date_original, g_date_digitized ), "dated json written" );
+
+        // Blank both dates, exactly as printed, in the dated json.
+        Buffer j;
+        check( load_file( empty_json.c_str(), j ), "dated json read back" );
+        std::string text = j.valid() ? std::string( (const char*)j.b.buffer, j.b.size ) : std::string();
+        const char* printed[] = { "\"2026-6-26 21:40:15\"", "\"2026-6-26 21:41:2\"" };
+        for( int i = 0; i < 2; ++i )
+        {
+            const size_t at = text.find( printed[i] );
+            check( at != std::string::npos, "json carries the date as the printer writes it" );
+            if( at != std::string::npos ) text.replace( at, std::strlen( printed[i] ), "\"\"" );
+        }
+        check( save_file( empty_json.c_str(), text.data(), text.size() ), "empty-date json written" );
+
+        dng_convert_params pr = preview_cli_params( g_cli_sample.c_str(), raw.c_str(), "" );
+        check( dng_convert_main( &pr ) == 0, "GPR -> RAW succeeds" );
+
+        Buffer oz, oe;
+        check( convert_raw_with_metadata( raw, zero_json, scratch_path( "dates_zero.DNG" ), oz ), "all-zero date converts" );
+        check( convert_raw_with_metadata( raw, empty_json, scratch_path( "dates_empty.DNG" ), oe ), "empty date converts" );
+        std::remove( raw.c_str() );
+        std::remove( zero_json.c_str() );
+        std::remove( empty_json.c_str() );
+
+        validate_dng_like( oz, g_cli_W, g_cli_H, /*vc5=*/false );
+
+        const unsigned int tags[] = { 306 /* DateTime */, 36867 /* DateTimeOriginal */, 36868 /* DateTimeDigitized */ };
+        std::string s;
+        for( int i = 0; i < 3; ++i )
+            check( oz.valid() && !tiff_find_ascii_tag( oz.b, tags[i], s ), "no date tag written" );
+        check( oz.valid() && oe.b.size == oz.b.size && std::memcmp( oe.b.buffer, oz.b.buffer, oz.b.size ) == 0,
+               "empty date writes the same file as an all-zero one" );
+    });
+}
+
+// ---------------------------------------------------------------------------
 // Command-line scanning (program_options_lite)
 //
 // Unknown options and options missing their value must be flagged as fatal via
@@ -2827,6 +2991,8 @@ int main( int argc, char* argv[] )
     run_raw_input_cli_tests();
 
     run_exif_string_cli_tests();
+
+    run_metadata_cli_tests();
 
     run_argument_parser_tests();
 
