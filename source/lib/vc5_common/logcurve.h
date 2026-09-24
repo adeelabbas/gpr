@@ -23,6 +23,13 @@
 
 #define LOG_CURVE_TABLE_LENGTH (1 << 12)
 
+// Every unpack path in the encoder indexes EncoderLogCurve with a uint16_t input sample, or the
+// sample shifted right, and nothing holds the sample to the pixel format's range (a DNG above its
+// white level, a RAW whose high bits are set). The table covers the whole uint16_t range so no
+// index can read past it; the entries past the 12-bit curve repeat its top value, so an
+// out-of-range sample saturates at white.
+#define ENCODER_LOG_CURVE_TABLE_LENGTH (1 << 16)
+
 #ifdef __cplusplus
 extern "C" {
 #endif
