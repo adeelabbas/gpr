@@ -285,10 +285,12 @@ scripts.
   rebase --onto origin/<default> <merged head> <its branch>`, and a push
   leased on the PR's head as the script listed it
   (`--force-with-lease=refs/heads/<its branch>:<its head>`), so a push
-  that landed after that is refused rather than lost. Deleting a branch
-  with a push closes every open PR based on it or coming from it, and a
-  closed PR whose base branch is gone can be neither reopened nor retargeted, so origin's
-  branch goes only once GitHub lists no open PR based on it and none but
+  that landed after that is refused rather than lost. The lines are
+  chained with `&&`, so a block pasted at once stops where one fails.
+  Deleting a branch with a push closes every open PR based on it or coming
+  from it, and a closed PR whose base branch is gone can be neither
+  reopened nor retargeted, so origin's branch goes only once GitHub lists
+  no open PR based on it and none but
   the merged one from it. The delete is leased on the head that was
   merged (`--force-with-lease`): a push that landed on the branch after
   the merge keeps the branch, with a line saying so, rather than being
