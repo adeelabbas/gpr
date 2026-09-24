@@ -2093,7 +2093,8 @@ bool write_dngstream_to_buffer( dng_stream* stream, gpr_buffer* output_buffer, g
 {
     size_t buffer_size  = stream->Length();
 
-    // write_dng wrote nothing (the VC-5 encode failed): there is no file to hand back
+    // write_dng wrote nothing (the VC-5 encode failed, or it returned early): there is no file
+    // to hand back
     if( buffer_size == 0 )
         return false;
 
@@ -2194,7 +2195,8 @@ bool gpr_convert_raw_to_dng(const gpr_allocator*    allocator,
 
     write_dng( allocator, &out_dng_stream, adjust_bayer_phase( parameters, &raw_buffer, &shifted_copy ), false, NULL, parameters );
 
-    write_dngstream_to_buffer( &out_dng_stream, out_dng_buffer, allocator->Alloc, allocator->Free );
+    if( write_dngstream_to_buffer( &out_dng_stream, out_dng_buffer, allocator->Alloc, allocator->Free ) == false )
+        return false;
 
     TIMESTAMP("[END]", 1)
 
@@ -2315,7 +2317,8 @@ bool gpr_convert_vc5_to_gpr(const gpr_allocator*    allocator,
     
     write_dng( allocator, &out_gpr_stream, NULL, false, &vc5_buffer, parameters );
 
-    write_dngstream_to_buffer( &out_gpr_stream, out_gpr_buffer, allocator->Alloc, allocator->Free );
+    if( write_dngstream_to_buffer( &out_gpr_stream, out_gpr_buffer, allocator->Alloc, allocator->Free ) == false )
+        return false;
     
     TIMESTAMP("[END]", 1)
 
@@ -2818,7 +2821,8 @@ bool gpr_convert_gpr_to_dng(const gpr_allocator*    allocator,
         write_dng( allocator, &out_dng_stream, &raw_buffer, false, NULL,
                    attach_preview( parameters, &preview_params, &preview_jpg ) );
 
-        write_dngstream_to_buffer( &out_dng_stream, out_dng_buffer, allocator->Alloc, allocator->Free );
+        if( write_dngstream_to_buffer( &out_dng_stream, out_dng_buffer, allocator->Alloc, allocator->Free ) == false )
+            return false;
     }
     catch( ... ) // the DNG SDK throws dng_exception on malformed input; C callers expect false
     {
@@ -2845,7 +2849,8 @@ bool gpr_convert_vc5_to_dng(const gpr_allocator*    allocator,
     
     write_dng( allocator, &out_dng_stream, NULL, false, &vc5_buffer, parameters );
 
-    write_dngstream_to_buffer( &out_dng_stream, out_dng_buffer, allocator->Alloc, allocator->Free );
+    if( write_dngstream_to_buffer( &out_dng_stream, out_dng_buffer, allocator->Alloc, allocator->Free ) == false )
+        return false;
 
     TIMESTAMP("[END]", 1)
 
