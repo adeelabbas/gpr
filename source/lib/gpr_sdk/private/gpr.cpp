@@ -828,7 +828,7 @@ static void convert_dng_exif_to_dng_exif_info( gpr_exif_info* dst_exif, const dn
     dst_exif->iso_speed_rating          = src_exif->fISOSpeedRatings[0];
     
     dst_exif->date_time_original        = convert_to_dng_date_and_time( src_exif->fDateTimeOriginal.DateTime() );
-    dst_exif->date_time_digitized       = convert_to_dng_date_and_time( src_exif->fDateTimeOriginal.DateTime() );
+    dst_exif->date_time_digitized       = convert_to_dng_date_and_time( src_exif->fDateTimeDigitized.DateTime() );
     
     copy_exif_string( dst_exif->software_version, sizeof(dst_exif->software_version), src_exif->fSoftware );
 
