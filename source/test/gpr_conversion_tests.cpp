@@ -1936,6 +1936,86 @@ static void run_left_justified_cli_tests()
 }
 
 // ---------------------------------------------------------------------------
+// Capture dates through gpr_tools (dng_convert_main)
+//
+// A GPR or DNG input's dates are read by gpr_parameters_parse_dng and written
+// back by the DNG writer. Each Exif date must come from its own tag. Uses the
+// sample run_preview_cli_tests loaded (g_cli_sample), so it runs after it.
+// ---------------------------------------------------------------------------
+
+static void run_capture_date_cli_tests()
+{
+    std::fprintf( stdout, "\n== gpr_tools capture dates (dng_convert_main) ==\n" );
+
+    if( g_cli_sample.empty() )
+    {
+        run_case( "capture dates: CLI sample", []{ check( false, "run_preview_cli_tests must run first (no CLI sample loaded)" ); } );
+        return;
+    }
+
+    // The reader used to fill date_time_digitized from DateTimeOriginal, so every conversion
+    // rewrote DateTimeDigitized. The CLI sample's own DateTimeDigitized (2016:03:25 15:55:23) is
+    // also the placeholder gpr_exif_info_set_defaults writes, which a reader that skipped the tag
+    // would produce as well, so the case gives a copy of the sample a third date, in place and
+    // of the same length. That copy's tags, read by hand, are the ground truth for the reader
+    // and for both outputs.
+    run_case( "capture dates: DateTimeDigitized survives GPR -> DNG and GPR -> GPR", []{
+        Buffer src;
+        check( load_file( g_cli_sample.c_str(), src ), "sample read" );
+        if( !src.valid() ) return;
+
+        unsigned char* d = (unsigned char*)src.b.buffer;
+        const bool     le = ( d[0] == 'I' );
+        const size_t   exif = tiff_find_entry( d, src.b.size, tiff_u32( d + 4, le ), 34665 /* ExifIFD */, le );
+        const size_t   entry = exif ? tiff_find_entry( d, src.b.size, tiff_u32( d + exif + 8, le ), 36868 /* DateTimeDigitized */, le ) : 0;
+        const bool     has_digitized = entry && tiff_u32( d + entry + 4, le ) == 20;
+        check( has_digitized, "sample carries DateTimeDigitized" );
+        if( !has_digitized ) return;
+        std::memcpy( d + tiff_u32( d + entry + 8, le ), "2019:07:14 09:08:07", 19 );
+
+        const std::string source = scratch_path( "digitized_src.GPR" );
+        check( save_file( source.c_str(), src.b.buffer, src.b.size ), "sample copy written" );
+
+        std::string original, digitized;
+        check( tiff_find_ascii_tag( src.b, 36867, original ) &&
+               tiff_find_ascii_tag( src.b, 36868, digitized ) && digitized == "2019:07:14 09:08:07",
+               "sample copy carries both dates" );
+        check( !original.empty() && original != digitized, "sample copy's two dates differ" );
+
+        gpr_parameters params;
+        gpr_parameters_set_defaults( &params );
+        check( gpr_parameters_parse_dng_file( &g_alloc, source.c_str(), &params ), "sample copy parses" );
+        const gpr_date_and_time& t = params.exif_info.date_time_digitized;
+        char parsed[64];
+        std::snprintf( parsed, sizeof(parsed), "%04u:%02u:%02u %02u:%02u:%02u",
+                       t.year, t.month, t.day, t.hour, t.minute, t.second );
+        check( digitized == parsed, "gpr_parameters_parse_dng reads DateTimeDigitized" );
+        gpr_parameters_destroy( &params, g_alloc.Free );
+
+        const char* outputs[] = { "digitized.DNG", "digitized.GPR" };
+        for( int i = 0; i < 2; ++i )
+        {
+            const std::string out = scratch_path( outputs[i] );
+            dng_convert_params p = preview_cli_params( source.c_str(), out.c_str(), "" );
+            check( dng_convert_main( &p ) == 0, "conversion succeeds" );
+
+            Buffer o;
+            const bool loaded = load_file( out.c_str(), o );
+            std::remove( out.c_str() );
+            check( loaded, "output written" );
+            if( !loaded ) continue;
+
+            validate_dng_like( o, g_cli_W, g_cli_H, /*vc5=*/ i == 1 );
+
+            std::string s;
+            check( tiff_find_ascii_tag( o.b, 36867, s ) && s == original, "DateTimeOriginal is the source's" );
+            check( tiff_find_ascii_tag( o.b, 36868, s ) && s == digitized, "DateTimeDigitized is the source's" );
+        }
+        std::remove( source.c_str() );
+    });
+}
+
+// ---------------------------------------------------------------------------
 // gpr_tools --quality (dng_convert_main)
 //
 // Selects the VC-5 quantizer table used whenever the image is encoded to GPR.
@@ -2511,13 +2591,13 @@ static void run_metadata_cli_tests()
             check( tiff_find_ascii_tag( o.b, 306, s ) && s == "2026:06:26 21:40:15",
                    "DateTime is the json's date_time_original" );
 
-            // The SDK's reader agrees with the tag. It fills date_time_digitized from
-            // DateTimeOriginal as well, so only the original is cross-checked.
+            // The SDK's reader agrees with both tags.
             gpr_parameters params;
             gpr_parameters_set_defaults( &params );
             check( gpr_parameters_parse_dng( &g_alloc, &o.b, &params ) &&
-                   std::memcmp( &params.exif_info.date_time_original, &g_date_original, sizeof(g_date_original) ) == 0,
-                   "gpr_parameters_parse_dng reads the same date_time_original" );
+                   std::memcmp( &params.exif_info.date_time_original, &g_date_original, sizeof(g_date_original) ) == 0 &&
+                   std::memcmp( &params.exif_info.date_time_digitized, &g_date_digitized, sizeof(g_date_digitized) ) == 0,
+                   "gpr_parameters_parse_dng reads the same dates" );
             gpr_parameters_destroy( &params, g_alloc.Free );
         }
         std::remove( raw.c_str() );
@@ -2985,6 +3065,8 @@ int main( int argc, char* argv[] )
     run_lens_correction_cli_tests( data_dir );
 
     run_left_justified_cli_tests();
+
+    run_capture_date_cli_tests();
 
     run_quality_cli_tests();
 
