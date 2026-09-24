@@ -3,7 +3,7 @@ name: next
 description: Say what has to be done next, in order, from the whole context - this conversation, the working tree, the branch's pull request and its CI, the other open pull requests, and what CLAUDE.md says is owed to the repositories this one is kept in sync with. Reads only; runs no step itself. Only when the user types /next.
 argument-hint: "[focus, optional - e.g. a PR number, 'sync', or a question]"
 disable-model-invocation: true
-allowed-tools: Bash(git branch --show-current), Bash(git remote get-url origin), Bash(git symbolic-ref --short refs/remotes/origin/HEAD), Bash(git fetch origin master), Bash(git fetch origin main), Bash(git fetch origin), Bash(git fetch --quiet https://github.com/gopro/gpr.git master), Bash(git merge-base *), Bash(git cherry *)
+allowed-tools: Bash(git branch --show-current), Bash(git remote get-url origin), Bash(git symbolic-ref --short refs/remotes/origin/HEAD), Bash(git fetch origin master), Bash(git fetch origin main), Bash(git fetch origin), Bash(git fetch --quiet https://github.com/gopro/gpr.git +master:refs/upstream/master), Bash(git merge-base *), Bash(git cherry *)
 ---
 
 # What comes next
@@ -212,9 +212,9 @@ name (`<branch>`, from `git branch --show-current`), or the one
   sign means the PR needs, before its `/review` and its `/merge`, in a
   checkout with nothing uncommitted:
 
-      git switch <its branch>
-      git merge --ff-only origin/<its branch>
-      git rebase --onto origin/<default> <merged PR's head> <its branch>
+      git switch <its branch> &&
+      git merge --ff-only origin/<its branch> &&
+      git rebase --onto origin/<default> <merged PR's head> <its branch> &&
       git push --force-with-lease=refs/heads/<its branch>:<its head> origin <its branch>
 
   `<merged PR's head>` is that `headRefOid`, or, with only `-` lines to go
@@ -287,11 +287,14 @@ repositories, can leave owing is a step. In adeelabbas/gpr it does both
   it is about writing files, rather than decoder-only work CLAUDE.md keeps
   out, is theirs to say. Name it, with its files.
 - **Upstream moving owes a merge here first.** Read upstream from its own
-  URL: `git fetch --quiet https://github.com/gopro/gpr.git master`, then,
-  before any other fetch rewrites `FETCH_HEAD`,
-  `git merge-base --is-ancestor FETCH_HEAD origin/<default>`. When it
-  fails, upstream has commits this repository has not merged, and
-  `git log --format='%h %s' origin/<default>..FETCH_HEAD` lists them. Never
+  URL, into a ref of its own:
+  `git fetch --quiet https://github.com/gopro/gpr.git +master:refs/upstream/master`,
+  then `git merge-base --is-ancestor refs/upstream/master origin/<default>`.
+  Not `FETCH_HEAD`: it is one per checkout, and a `/review` or an editor
+  fetching meanwhile rewrites it, so the check would compare the wrong
+  commit. When it fails, upstream has commits this repository has not
+  merged, and `git log --format='%h %s' origin/<default>..refs/upstream/master`
+  lists them. Never
   read upstream from a branch of `origin` named after it: adeelabbas/gpr's
   `origin/gopro/gpr` is this fork's delta replayed as a clean series onto
   upstream's `master`, the branch offered to GoPro, and it moves only when

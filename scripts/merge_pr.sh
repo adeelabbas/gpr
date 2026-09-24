@@ -587,7 +587,7 @@ else
                     [ "$fork" = true ] || PLAIN=1 ;;
                 CLOSED*)
                     note "  warning: #$n ($head) is closed: $BRANCH was deleted by a push, which closes the PRs based on it rather than retargeting them."
-                    note "    To bring it back: git push origin $HEAD_SHA:refs/heads/$BRANCH, then gh pr reopen $n and gh pr edit $n --base $BASE, then delete $BRANCH again." ;;
+                    note "    To bring it back: git push origin $HEAD_SHA:refs/heads/$BRANCH, then gh pr reopen $n -R $GH_REPO and gh pr edit $n -R $GH_REPO --base $BASE, then delete $BRANCH again (a bare gh in a fork's clone acts on the parent's #$n)." ;;
                 *)
                     note "  warning: could not tell what became of #$n ($head), which was based on $BRANCH; check it by hand." ;;
             esac

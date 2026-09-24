@@ -151,11 +151,16 @@ After each retarget the script prints what that PR now needs before it
 merges:
 
     then, before #NN merges, in a checkout with nothing uncommitted:
-      git fetch origin
-      git switch <its branch>
-      git merge --ff-only origin/<its branch>
-      git rebase --onto origin/<default> <merged PR's head> <its branch>
+      git fetch origin &&
+      git switch <its branch> &&
+      git merge --ff-only origin/<its branch> &&
+      git rebase --onto origin/<default> <merged PR's head> <its branch> &&
       git push --force-with-lease=refs/heads/<its branch>:<its head> origin <its branch>
+
+The lines are chained with `&&`, so the block pasted at once stops where
+one fails: unchained, a `--ff-only` that refused let the rebase run on a
+stale local copy, and the leased push, whose lease still matched, drop the
+commit only origin had.
 
 Its branch still carries the merged PR's original commits, and the default
 branch has only their squash or their rebased copies. The rebase replays
