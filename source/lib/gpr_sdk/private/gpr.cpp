@@ -770,19 +770,37 @@ static void convert_dng_exif_info_to_dng_exif( dng_exif* dst_exif, const gpr_exi
     }
 }
 
+// Copies a string read from the input file into one of gpr_exif_info's fixed char arrays. The
+// file puts no bound on its length, so a longer string is cut to fit, back to the start of a
+// UTF-8 character as dng_string::Truncate does, and the copy is always NUL-terminated.
+static void copy_exif_string( char* dst, size_t dst_size, const dng_string& src )
+{
+    const char* s = src.Get();
+
+    size_t length = strlen( s );
+
+    if( length >= dst_size )
+    {
+        length = dst_size - 1;
+
+        while( length > 0 && ( (unsigned char)s[length] & 0xC0 ) == 0x80 )
+            length--;
+    }
+
+    memcpy( dst, s, length );
+
+    dst[length] = '\0';
+}
+
 static void convert_dng_exif_to_dng_exif_info( gpr_exif_info* dst_exif, const dng_exif* src_exif )
 {
-    assert(src_exif->fModel.Length() < sizeof(dst_exif->camera_model));
-    strcpy( dst_exif->camera_model, src_exif->fModel.Get() );
+    copy_exif_string( dst_exif->camera_model, sizeof(dst_exif->camera_model), src_exif->fModel );
 
-    assert(src_exif->fMake.Length() < sizeof(dst_exif->camera_make));
-    strcpy( dst_exif->camera_make, src_exif->fMake.Get() );
+    copy_exif_string( dst_exif->camera_make, sizeof(dst_exif->camera_make), src_exif->fMake );
 
-    assert(src_exif->fCameraSerialNumber.Length() < sizeof(dst_exif->camera_serial));
-    strcpy( dst_exif->camera_serial, src_exif->fCameraSerialNumber.Get() );
+    copy_exif_string( dst_exif->camera_serial, sizeof(dst_exif->camera_serial), src_exif->fCameraSerialNumber );
 
-    assert(src_exif->fImageDescription.Length() < sizeof(dst_exif->image_description));
-    strcpy( dst_exif->image_description, src_exif->fImageDescription.Get() );
+    copy_exif_string( dst_exif->image_description, sizeof(dst_exif->image_description), src_exif->fImageDescription );
     
     dst_exif->aperture          = convert_to_unsigned_rational( src_exif->fMaxApertureValue );
     dst_exif->f_stop_number     = convert_to_unsigned_rational( src_exif->fFNumber );
@@ -812,11 +830,9 @@ static void convert_dng_exif_to_dng_exif_info( gpr_exif_info* dst_exif, const dn
     dst_exif->date_time_original        = convert_to_dng_date_and_time( src_exif->fDateTimeOriginal.DateTime() );
     dst_exif->date_time_digitized       = convert_to_dng_date_and_time( src_exif->fDateTimeOriginal.DateTime() );
     
-    assert(src_exif->fSoftware.Length() < sizeof(dst_exif->software_version));
-    memcpy( dst_exif->software_version, src_exif->fSoftware.Get(), src_exif->fSoftware.Length() );
+    copy_exif_string( dst_exif->software_version, sizeof(dst_exif->software_version), src_exif->fSoftware );
 
-    assert(src_exif->fUserComment.Length() < sizeof(dst_exif->user_comment));
-    memcpy( dst_exif->user_comment, src_exif->fUserComment.Get(), src_exif->fUserComment.Length() );
+    copy_exif_string( dst_exif->user_comment, sizeof(dst_exif->user_comment), src_exif->fUserComment );
     
     // GPS Info
     gpr_gps_info& dst_gps_info = dst_exif->gps_info;
@@ -825,13 +841,13 @@ static void convert_dng_exif_to_dng_exif_info( gpr_exif_info* dst_exif, const dn
 
     dst_gps_info.gps_info_valid = dst_gps_info.version_id > 0;
     
-    strcpy( dst_gps_info.latitude_ref, src_exif->fGPSLatitudeRef.Get() );
+    copy_exif_string( dst_gps_info.latitude_ref, sizeof(dst_gps_info.latitude_ref), src_exif->fGPSLatitudeRef );
     
     dst_gps_info.latitude[0] = convert_to_unsigned_rational( src_exif->fGPSLatitude[0] );
     dst_gps_info.latitude[1] = convert_to_unsigned_rational( src_exif->fGPSLatitude[1] );
     dst_gps_info.latitude[2] = convert_to_unsigned_rational( src_exif->fGPSLatitude[2] );
 
-    strcpy( dst_gps_info.longitude_ref, src_exif->fGPSLongitudeRef.Get() );
+    copy_exif_string( dst_gps_info.longitude_ref, sizeof(dst_gps_info.longitude_ref), src_exif->fGPSLongitudeRef );
     
     dst_gps_info.longitude[0] = convert_to_unsigned_rational( src_exif->fGPSLongitude[0] );
     dst_gps_info.longitude[1] = convert_to_unsigned_rational( src_exif->fGPSLongitude[1] );
@@ -845,53 +861,53 @@ static void convert_dng_exif_to_dng_exif_info( gpr_exif_info* dst_exif, const dn
     dst_gps_info.time_stamp[1] = convert_to_unsigned_rational( src_exif->fGPSTimeStamp[1] );
     dst_gps_info.time_stamp[2] = convert_to_unsigned_rational( src_exif->fGPSTimeStamp[2] );
     
-    strcpy( dst_gps_info.satellites, src_exif->fGPSSatellites.Get() );
+    copy_exif_string( dst_gps_info.satellites, sizeof(dst_gps_info.satellites), src_exif->fGPSSatellites );
     
-    strcpy( dst_gps_info.status, src_exif->fGPSStatus.Get() );
+    copy_exif_string( dst_gps_info.status, sizeof(dst_gps_info.status), src_exif->fGPSStatus );
     
-    strcpy( dst_gps_info.measure_mode, src_exif->fGPSMeasureMode.Get() );
+    copy_exif_string( dst_gps_info.measure_mode, sizeof(dst_gps_info.measure_mode), src_exif->fGPSMeasureMode );
 
     dst_gps_info.dop = convert_to_unsigned_rational( src_exif->fGPSDOP );
     
-    strcpy( dst_gps_info.speed_ref, src_exif->fGPSSpeedRef.Get() );
+    copy_exif_string( dst_gps_info.speed_ref, sizeof(dst_gps_info.speed_ref), src_exif->fGPSSpeedRef );
     
     dst_gps_info.speed = convert_to_unsigned_rational( src_exif->fGPSSpeed );
     
-    strcpy( dst_gps_info.track_ref, src_exif->fGPSTrackRef.Get() );
+    copy_exif_string( dst_gps_info.track_ref, sizeof(dst_gps_info.track_ref), src_exif->fGPSTrackRef );
     
     dst_gps_info.track = convert_to_unsigned_rational( src_exif->fGPSTrack );
     
-    strcpy( dst_gps_info.img_direction_ref,  src_exif->fGPSImgDirectionRef.Get() );
+    copy_exif_string( dst_gps_info.img_direction_ref, sizeof(dst_gps_info.img_direction_ref), src_exif->fGPSImgDirectionRef );
     
     dst_gps_info.img_direction = convert_to_unsigned_rational( src_exif->fGPSImgDirection );
     
-    strcpy( dst_gps_info.map_datum, src_exif->fGPSMapDatum.Get() );
+    copy_exif_string( dst_gps_info.map_datum, sizeof(dst_gps_info.map_datum), src_exif->fGPSMapDatum );
     
-    strcpy( dst_gps_info.dest_latitude_ref, src_exif->fGPSDestLatitudeRef.Get() );
+    copy_exif_string( dst_gps_info.dest_latitude_ref, sizeof(dst_gps_info.dest_latitude_ref), src_exif->fGPSDestLatitudeRef );
     
     dst_gps_info.dest_latitude[0] = convert_to_unsigned_rational( src_exif->fGPSDestLatitude[0] );
     dst_gps_info.dest_latitude[1] = convert_to_unsigned_rational( src_exif->fGPSDestLatitude[1] );
     dst_gps_info.dest_latitude[2] = convert_to_unsigned_rational( src_exif->fGPSDestLatitude[2] );
 
-    strcpy( dst_gps_info.dest_longitude_ref, src_exif->fGPSDestLongitudeRef.Get() );
+    copy_exif_string( dst_gps_info.dest_longitude_ref, sizeof(dst_gps_info.dest_longitude_ref), src_exif->fGPSDestLongitudeRef );
     
     dst_gps_info.dest_longitude[0] = convert_to_unsigned_rational( src_exif->fGPSDestLongitude[0] );
     dst_gps_info.dest_longitude[1] = convert_to_unsigned_rational( src_exif->fGPSDestLongitude[1] );
     dst_gps_info.dest_longitude[2] = convert_to_unsigned_rational( src_exif->fGPSDestLongitude[2] );
     
-    strcpy( dst_gps_info.dest_bearing_ref, src_exif->fGPSDestBearingRef.Get() );
+    copy_exif_string( dst_gps_info.dest_bearing_ref, sizeof(dst_gps_info.dest_bearing_ref), src_exif->fGPSDestBearingRef );
     
     dst_gps_info.dest_bearing = convert_to_unsigned_rational( src_exif->fGPSDestBearing );
     
-    strcpy( dst_gps_info.dest_distance_ref, src_exif->fGPSDestDistanceRef.Get() );
+    copy_exif_string( dst_gps_info.dest_distance_ref, sizeof(dst_gps_info.dest_distance_ref), src_exif->fGPSDestDistanceRef );
     
     dst_gps_info.dest_distance = convert_to_unsigned_rational( src_exif->fGPSDestDistance );
     
-    strcpy( dst_gps_info.processing_method, src_exif->fGPSProcessingMethod.Get() );
+    copy_exif_string( dst_gps_info.processing_method, sizeof(dst_gps_info.processing_method), src_exif->fGPSProcessingMethod );
     
-    strcpy( dst_gps_info.area_information, src_exif->fGPSAreaInformation.Get() );
+    copy_exif_string( dst_gps_info.area_information, sizeof(dst_gps_info.area_information), src_exif->fGPSAreaInformation );
     
-    strcpy( dst_gps_info.date_stamp, src_exif->fGPSDateStamp.Get() );
+    copy_exif_string( dst_gps_info.date_stamp, sizeof(dst_gps_info.date_stamp), src_exif->fGPSDateStamp );
     
     dst_gps_info.differential = src_exif->fGPSDifferential;
 }

@@ -232,6 +232,28 @@ static unsigned int tiff_u32( const unsigned char* p, bool le )
               : ( ((unsigned)p[0]<<24) | (p[1]<<16) | (p[2]<<8) | p[3] );
 }
 
+// Offset of the 12 byte entry for `tag` in the IFD at `ifd` of the n bytes at d, or 0 if the IFD
+// has none or lies outside them.
+static size_t tiff_find_entry( const unsigned char* d, size_t n, size_t ifd, unsigned int tag, bool le )
+{
+    if( ifd == 0 || ifd + 2 > n ) return 0;
+    const unsigned int count = tiff_u16( d + ifd, le );
+    for( size_t e = ifd + 2; e < ifd + 2 + (size_t)count * 12 && e + 12 <= n; e += 12 )
+        if( tiff_u16( d + e, le ) == tag ) return e;
+    return 0;
+}
+
+// The value bytes of the byte-sized (ASCII, BYTE or UNDEFINED) entry at `entry`, all `count` of
+// them (an ASCII value's NUL included). False if they lie outside the n bytes at d.
+static bool tiff_entry_bytes( const unsigned char* d, size_t n, size_t entry, bool le, std::string& bytes )
+{
+    const size_t count = tiff_u32( d + entry + 4, le );
+    const size_t value = ( count <= 4 ) ? entry + 8 : tiff_u32( d + entry + 8, le );
+    if( value > n || count > n - value ) return false;
+    bytes.assign( (const char*)d + value, count );
+    return true;
+}
+
 // Returns true if any IFD (including SubIFDs) sets Compression (259) to ccVc5 (9).
 // An independent ground truth (reads the TIFF tag directly) that the test cross-checks
 // against the public gpr_check_vc5() at every call site. vc5_size receives that IFD's
@@ -2222,6 +2244,168 @@ static void run_raw_input_cli_tests()
 }
 
 // ---------------------------------------------------------------------------
+// Over-long EXIF strings (dng_convert_main), DNG -> DNG
+//
+// gpr_exif_info keeps Make, Model, Software, ImageDescription, the GPS refs and
+// the other EXIF strings in fixed char arrays, while a file puts no bound on
+// their length. Reading a DNG cuts each string to its array, at a UTF-8
+// character boundary, NUL-terminates it and leaves every other field alone, so
+// the conversion goes on. The input is a DNG written from the CLI sample with
+// some string tags pointed at longer values appended to the file. Uses
+// g_cli_sample, so it runs after run_preview_cli_tests.
+// ---------------------------------------------------------------------------
+
+static void tiff_put_u32( unsigned char* p, unsigned int v, bool le )
+{
+    for( int i = 0; i < 4; i++ )
+        p[ le ? i : 3 - i ] = (unsigned char)( v >> ( 8 * i ) );
+}
+
+// Points the ASCII entry at `entry` at `value`, appended at an even offset. `value` must be
+// 4 bytes or longer, so that with its NUL it is stored outside the entry.
+static void tiff_append_ascii( std::vector<unsigned char>& d, size_t entry, const std::string& value, bool le )
+{
+    if( d.size() & 1 ) d.push_back( 0 );
+    tiff_put_u32( &d[entry + 4], (unsigned int)value.size() + 1, le );
+    tiff_put_u32( &d[entry + 8], (unsigned int)d.size(), le );
+    d.insert( d.end(), value.begin(), value.end() );
+    d.push_back( 0 );
+}
+
+// A string field as it must read after an over-long `value`: its first `length` bytes, then zeros.
+static void expect_prefix( char* field, size_t size, const std::string& value, size_t length )
+{
+    std::memset( field, 0, size );
+    std::memcpy( field, value.data(), length );
+}
+
+static void run_exif_string_cli_tests()
+{
+    std::fprintf( stdout, "\n== gpr_tools over-long EXIF strings (dng_convert_main) ==\n" );
+
+    if( g_cli_sample.empty() )
+    {
+        run_case( "over-long EXIF strings: CLI sample", []{ check( false, "run_preview_cli_tests must run first (no CLI sample loaded)" ); } );
+        return;
+    }
+
+    run_case( "over-long EXIF strings: cut to the field and NUL-terminated, conversion succeeds", []{
+        const std::string src = scratch_path( "exif_src.DNG" );
+        dng_convert_params ps = preview_cli_params( g_cli_sample.c_str(), src.c_str(), "" );
+        check( dng_convert_main( &ps ) == 0, "GPR -> DNG succeeds" );
+
+        Buffer s;
+        const bool loaded = load_file( src.c_str(), s ) && is_tiff_container( s.b );
+        check( loaded, "source DNG written" );
+        if( !loaded )
+        {
+            std::remove( src.c_str() );
+            return;
+        }
+
+        std::vector<unsigned char> d( (const unsigned char*)s.b.buffer, (const unsigned char*)s.b.buffer + s.b.size );
+        const bool   le   = ( d[0] == 'I' );
+        const size_t ifd0 = tiff_u32( &d[4], le );
+        const size_t gps_pointer = tiff_find_entry( &d[0], d.size(), ifd0, 34853 /* GPSInfo */, le );
+        const size_t gps  = gps_pointer ? tiff_u32( &d[gps_pointer + 8], le ) : 0;
+
+        const size_t model_entry       = tiff_find_entry( &d[0], d.size(), ifd0, 272 /* Model */, le );
+        const size_t software_entry    = tiff_find_entry( &d[0], d.size(), ifd0, 305 /* Software */, le );
+        const size_t description_entry = tiff_find_entry( &d[0], d.size(), ifd0, 270 /* ImageDescription */, le );
+        const size_t latitude_ref_entry = tiff_find_entry( &d[0], d.size(), gps, 1 /* GPSLatitudeRef */, le );
+        check( model_entry && software_entry && description_entry && latitude_ref_entry,
+               "source DNG carries Model, Software, ImageDescription and GPSLatitudeRef" );
+        if( !model_entry || !software_entry || !description_entry || !latitude_ref_entry )
+        {
+            std::remove( src.c_str() );
+            return;
+        }
+
+        // 100 bytes against 32 byte fields. The description has a two byte UTF-8 character
+        // (U+00E9) at bytes 30-31, which a cut at 31 bytes would split: it has to go whole.
+        std::string model, software;
+        for( int i = 0; i < 100; i++ )
+        {
+            model    += (char)( 'A' + i % 26 );
+            software += (char)( 'a' + i % 26 );
+        }
+        const std::string description  = std::string( 30, 'x' ) + "\xC3\xA9" + std::string( 68, 'y' );
+        const std::string latitude_ref = "South";
+
+        tiff_append_ascii( d, model_entry, model, le );
+        tiff_append_ascii( d, software_entry, software, le );
+        tiff_append_ascii( d, description_entry, description, le );
+        tiff_append_ascii( d, latitude_ref_entry, latitude_ref, le );
+
+        const std::string patched = scratch_path( "exif_long.DNG" );
+        check( save_file( patched.c_str(), &d[0], d.size() ), "patched DNG written" );
+
+        const std::string out = scratch_path( "exif_out.DNG" );
+        dng_convert_params p = preview_cli_params( patched.c_str(), out.c_str(), "" );
+        check( dng_convert_main( &p ) == 0, "conversion succeeds" );
+
+        // What the output file holds, read by hand: the parse below cuts every string again, so
+        // it could not tell a writer that wrote the whole 100 bytes from one that wrote the cut.
+        Buffer o;
+        const bool out_loaded = load_file( out.c_str(), o ) && is_tiff_container( o.b );
+        check( out_loaded, "output DNG written" );
+        if( out_loaded )
+        {
+            const unsigned char* od = (const unsigned char*)o.b.buffer;
+            const bool   ole   = ( od[0] == 'I' );
+            const size_t oifd0 = tiff_u32( od + 4, ole );
+            const size_t ogps_pointer = tiff_find_entry( od, o.b.size, oifd0, 34853 /* GPSInfo */, ole );
+            const size_t ogps  = ogps_pointer ? tiff_u32( od + ogps_pointer + 8, ole ) : 0;
+
+            const struct { size_t ifd; unsigned int tag; std::string expect; } tags[] = {
+                { oifd0, 272, model.substr( 0, 31 ) },
+                { oifd0, 305, software.substr( 0, 31 ) },
+                { oifd0, 270, description.substr( 0, 30 ) },
+                { ogps,  1,   latitude_ref.substr( 0, 1 ) },
+            };
+            for( size_t t = 0; t < sizeof(tags) / sizeof(tags[0]); ++t )
+            {
+                const size_t entry = tiff_find_entry( od, o.b.size, tags[t].ifd, tags[t].tag, ole );
+                std::string bytes;
+                check( entry && tiff_entry_bytes( od, o.b.size, entry, ole, bytes ) &&
+                       bytes == tags[t].expect + std::string( 1, '\0' ),
+                       "output tag holds the cut string and its NUL" );
+            }
+        }
+
+        gpr_parameters original, parsed, written;
+        gpr_parameters_set_defaults( &original );
+        gpr_parameters_set_defaults( &parsed );
+        gpr_parameters_set_defaults( &written );
+        check( gpr_parameters_parse_dng_file( &g_alloc, src.c_str(), &original ), "source DNG parses" );
+        check( gpr_parameters_parse_dng_file( &g_alloc, patched.c_str(), &parsed ), "patched DNG parses" );
+        check( gpr_parameters_parse_dng_file( &g_alloc, out.c_str(), &written ), "output DNG parses" );
+        std::remove( src.c_str() );
+        std::remove( patched.c_str() );
+        std::remove( out.c_str() );
+
+        // The source's fields with the four patched strings cut to fit: 31 bytes and a NUL,
+        // 30 for the description, 1 for the 2 byte GPS ref. Both sides start from
+        // gpr_parameters_set_defaults, so memcmp is exact and catches a write into any field.
+        gpr_exif_info expect;
+        std::memcpy( &expect, &original.exif_info, sizeof(expect) );
+        expect_prefix( expect.camera_model, sizeof(expect.camera_model), model, 31 );
+        expect_prefix( expect.software_version, sizeof(expect.software_version), software, 31 );
+        expect_prefix( expect.image_description, sizeof(expect.image_description), description, 30 );
+        expect_prefix( expect.gps_info.latitude_ref, sizeof(expect.gps_info.latitude_ref), latitude_ref, 1 );
+
+        check( std::memcmp( &parsed.exif_info, &expect, sizeof(expect) ) == 0,
+               "parsed strings are the prefixes that fit, every other field unchanged" );
+        check( std::memcmp( &written.exif_info, &expect, sizeof(expect) ) == 0,
+               "output DNG parses to the same fields" );
+
+        gpr_parameters_destroy( &original, g_alloc.Free );
+        gpr_parameters_destroy( &parsed, g_alloc.Free );
+        gpr_parameters_destroy( &written, g_alloc.Free );
+    });
+}
+
+// ---------------------------------------------------------------------------
 // Command-line scanning (program_options_lite)
 //
 // Unknown options and options missing their value must be flagged as fatal via
@@ -2641,6 +2825,8 @@ int main( int argc, char* argv[] )
     run_quality_cli_tests();
 
     run_raw_input_cli_tests();
+
+    run_exif_string_cli_tests();
 
     run_argument_parser_tests();
 
