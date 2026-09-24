@@ -198,7 +198,12 @@ the branch at the merge and retargets the stacked PRs to the default
 branch on its own. The script then prints `origin/<branch> is already
 gone` and, for each PR it listed before the merge, `GitHub retargeted #NN
 (<its branch>) to <default> when it deleted <branch>` with the same lines:
-those PRs carry the merged PR's commits just the same.
+those PRs carry the merged PR's commits just the same. The script asks
+GitHub each one's state first. When a push rather than GitHub deleted the
+branch, the PRs based on it are closed instead, and it says so
+(`warning: #NN ... is closed`) with how to bring each back: push the
+branch again at the merged head, reopen the PR, retarget it, and delete
+the branch once more. That recovery is the user's to run.
 
 A PR that is already merged skips straight to that cleanup, the retargeting
 included, and needs no method (`--rebase goes unused: ...` when one was
