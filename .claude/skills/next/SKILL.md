@@ -133,7 +133,11 @@ name (`<branch>`, from `git branch --show-current`), or the one
   and that is neither a failure nor a wait. Where one is required, such a
   PR never gets it and sits `BLOCKED` for good - the workflow's comment on
   its paths says what that took before - so that is a decision for the
-  operator, not something to wait out.
+  operator, not something to wait out. Where the trigger has no `paths:`
+  list and a job decides instead (the build jobs `need` one that reads the
+  PR's files), such a PR shows the build jobs as skipped, and GitHub counts
+  a skipped job as passing for a required check: neither a failure nor a
+  block.
 - **Divergence**: when `headRefOid` is not this checkout's commit, the two
   have moved apart. A head ahead of the checkout, typically a case the
   test-gap pass committed, means pulling it (`git pull --ff-only`) is the
