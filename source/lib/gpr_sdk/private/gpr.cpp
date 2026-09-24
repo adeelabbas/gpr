@@ -627,10 +627,10 @@ static gpr_date_and_time convert_to_dng_date_and_time( const dng_date_time& x )
     return a;
 }
 
-static void add_preview_to_list(dng_host& host, dng_preview_list*& preview_list, const void* preview_buffer, unsigned int preview_h, unsigned int preview_w, unsigned int preview_size )
+static void add_preview_to_list(dng_host& host, AutoPtr<dng_preview_list>& preview_list, const void* preview_buffer, unsigned int preview_h, unsigned int preview_w, unsigned int preview_size )
 {
-    if( preview_list == NULL )
-        preview_list = new dng_preview_list;
+    if( preview_list.Get() == NULL )
+        preview_list.Reset( new dng_preview_list );
 
     AutoPtr<dng_jpeg_preview> jpeg_preview;
     jpeg_preview.Reset(new dng_jpeg_preview);
@@ -1976,9 +1976,14 @@ static void write_dng(const gpr_allocator*          allocator,
   
     negative->SetStage1Image(image);
     
-    dng_preview_list* preview_list = NULL;
+    // Both owned through AutoPtr, not deleted by hand at the end: WriteDNG below throws on
+    // more than malformed input (host.Allocate for a tile buffer, a stream that cannot grow),
+    // and gpr_convert_gpr_to_dng turns that throw into a return the caller survives, so a
+    // delete it skips is a leak of the writer, the list and the preview JPEG it holds in a
+    // process that goes on running.
+    AutoPtr<dng_preview_list> preview_list;
   
-    dng_image_writer* writer = NULL;
+    AutoPtr<dng_image_writer> writer;
   
 #if GPR_WRITING
     gpr_image_writer* gpr_writer = NULL;
@@ -1986,6 +1991,7 @@ static void write_dng(const gpr_allocator*          allocator,
     if( vc5_dng )
     {
         gpr_writer = new gpr_image_writer(raw_image_buffer, convert_params->input_width, convert_params->input_height, convert_params->input_pitch, vc5_image_buffer );
+        writer.Reset( gpr_writer );     // owned from here on
 
         // The preview is generated from the (already black-subtracted) encoded data, so its
         // black level must be 0 too -- otherwise it would be subtracted a second time.
@@ -2008,13 +2014,11 @@ static void write_dng(const gpr_allocator*          allocator,
         set_vc5_encoder_parameters( gpr_writer->GetVc5EncoderParams(), &enc_params, preview_shading_tables );
 
         gpr_writer->EncodeVc5Image();
-
-        writer = gpr_writer;
     }
     else
 #endif
     {
-        writer = new dng_image_writer;
+        writer.Reset( new dng_image_writer );
     }
 
     // Preview / thumbnail, for both output paths. Without one, WriteDNG leaves the raw image
@@ -2076,13 +2080,8 @@ static void write_dng(const gpr_allocator*          allocator,
 
     writer->SetComputeMd5Sum( convert_params->compute_md5sum );
     
-    assert(writer);
-    writer->WriteDNG(host, *dng_write_stream, *negative.Get(), preview_list, dngVersion_Current, vc5_dng == false );
-  
-    delete writer;
-  
-  if( preview_list )
-    delete preview_list;
+    assert(writer.Get());
+    writer->WriteDNG(host, *dng_write_stream, *negative.Get(), preview_list.Get(), dngVersion_Current, vc5_dng == false );
 }
 
 extern dng_memory_allocator gDefaultDNGMemoryAllocator;
