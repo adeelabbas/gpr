@@ -2425,6 +2425,13 @@ static void run_raw_input_cli_tests()
         gpr_buffer tmp = o.b;
         check( gpr_check_vc5( &g_alloc, &tmp ), "vc5 compression flag set (gpr_check_vc5)" );
 
+        // No gpr_tools path reaches gpr_convert_dng_to_vc5, so it is called directly: it
+        // asserted after read_dng failed, aborting Debug builds, where the other readers
+        // already returned false.
+        Buffer vc5;
+        check( !gpr_convert_dng_to_vc5( &g_alloc, &o.b, &vc5.b ), "dng_to_vc5 returns false" );
+        check( !vc5.valid(), "no vc5 output" );
+
         const std::string dng = scratch_path( "gbrg16383.DNG" );
         dng_convert_params pd = preview_cli_params( gpr.c_str(), dng.c_str(), "" );
         check( dng_convert_main( &pd ) != 0, "gpr -> dng reports failure" );
