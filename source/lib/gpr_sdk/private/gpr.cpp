@@ -1970,7 +1970,10 @@ static void write_dng(const gpr_allocator*          allocator,
         dng_date_time_info date_time_original;
         date_time_original.SetDateTime( convert_to_dng_date_time( exif_info->date_time_original ) );
         
-        negative->UpdateDateTime(date_time_original);
+        // An unknown (invalid) date is left out. The Exif writer skips an invalid date on its
+        // own, but the XMP would still get it, as an empty xmp:ModifyDate="".
+        if( date_time_original.IsValid() )
+            negative->UpdateDateTime(date_time_original);
     }
     
     if( convert_params->gpmf_payload.buffer != NULL && convert_params->gpmf_payload.size > 0 )

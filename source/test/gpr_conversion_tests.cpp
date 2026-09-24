@@ -1939,9 +1939,21 @@ static void run_left_justified_cli_tests()
 // Capture dates through gpr_tools (dng_convert_main)
 //
 // A GPR or DNG input's dates are read by gpr_parameters_parse_dng and written
-// back by the DNG writer. Each Exif date must come from its own tag. Uses the
+// back by the DNG writer. Each Exif date must come from its own tag, and an
+// unknown date must leave no date behind, in the Exif or in the XMP. Uses the
 // sample run_preview_cli_tests loaded (g_cli_sample), so it runs after it.
 // ---------------------------------------------------------------------------
+
+// The XMP packet (tag 700) from IFD0, straight from the bytes. Returns false when there is none.
+static bool tiff_find_xmp( const gpr_buffer& buf, std::string& packet )
+{
+    if( !buf.buffer || buf.size < 8 ) return false;
+    const unsigned char* d = (const unsigned char*)buf.buffer;
+    const bool le = ( d[0] == 'I' );
+
+    const size_t entry = tiff_find_entry( d, buf.size, tiff_u32( d + 4, le ), 700 /* XMP */, le );
+    return entry && tiff_entry_bytes( d, buf.size, entry, le, packet );
+}
 
 static void run_capture_date_cli_tests()
 {
@@ -2012,6 +2024,78 @@ static void run_capture_date_cli_tests()
             check( tiff_find_ascii_tag( o.b, 36868, s ) && s == digitized, "DateTimeDigitized is the source's" );
         }
         std::remove( source.c_str() );
+    });
+
+    // Exif writes an unknown date as blanks and colons, and the DNG SDK reads that, like a DNG
+    // with no date tags at all, as all zeros. The Exif writer always left such a date out; the
+    // XMP got it anyway, as an empty xmp:ModifyDate="". The dated DNG is the contrast case: its
+    // XMP does carry a date, so the reader below can see one.
+    run_case( "capture dates: an unknown date writes no Exif or XMP date", []{
+        const std::string dated = scratch_path( "dated.DNG" );
+        dng_convert_params pd = preview_cli_params( g_cli_sample.c_str(), dated.c_str(), "" );
+        check( dng_convert_main( &pd ) == 0, "GPR -> DNG succeeds" );
+
+        Buffer in;
+        const bool loaded = load_file( dated.c_str(), in );
+        std::remove( dated.c_str() );
+        check( loaded, "dated DNG written" );
+        if( !loaded ) return;
+
+        std::string xmp;
+        check( tiff_find_xmp( in.b, xmp ) && xmp.find( "Date" ) != std::string::npos,
+               "dated DNG's XMP carries a date" );
+
+        // Blank the three Exif dates in place, same length, so no offset moves.
+        const unsigned int tags[] = { 306 /* DateTime */, 36867 /* DateTimeOriginal */, 36868 /* DateTimeDigitized */ };
+        const std::string unknown( "    :  :     :  :  ", 20 );   // 19 characters and the NUL
+        std::string bytes( (const char*)in.b.buffer, in.b.size );
+        for( int i = 0; i < 3; ++i )
+        {
+            std::string s;
+            check( tiff_find_ascii_tag( in.b, tags[i], s ) && s.size() == 19, "dated DNG carries the date tag" );
+            if( s.size() != 19 ) continue;
+
+            const std::string date( s.c_str(), 20 );
+            for( size_t at = bytes.find( date ); at != std::string::npos; at = bytes.find( date, at + date.size() ) )
+                bytes.replace( at, date.size(), unknown );
+        }
+
+        // gpr_parameters_parse_dng reads the Exif dates only, so the input's own XMP date does
+        // not reach it; the parse below is what proves the input reads as undated.
+        const std::string undated = scratch_path( "undated.DNG" );
+        check( save_file( undated.c_str(), bytes.data(), bytes.size() ), "undated DNG written" );
+
+        gpr_parameters params;
+        gpr_parameters_set_defaults( &params );
+        const gpr_date_and_time zero = construct_gpr_date_and_time( 0, 0, 0, 0, 0, 0 );
+        check( gpr_parameters_parse_dng_file( &g_alloc, undated.c_str(), &params ) &&
+               std::memcmp( &params.exif_info.date_time_original, &zero, sizeof(zero) ) == 0 &&
+               std::memcmp( &params.exif_info.date_time_digitized, &zero, sizeof(zero) ) == 0,
+               "undated DNG parses to all-zero dates" );
+        gpr_parameters_destroy( &params, g_alloc.Free );
+
+        const char* outputs[] = { "undated_out.DNG", "undated_out.GPR" };
+        for( int i = 0; i < 2; ++i )
+        {
+            const std::string out = scratch_path( outputs[i] );
+            dng_convert_params p = preview_cli_params( undated.c_str(), out.c_str(), "" );
+            check( dng_convert_main( &p ) == 0, "conversion succeeds" );
+
+            Buffer o;
+            const bool written = load_file( out.c_str(), o );
+            std::remove( out.c_str() );
+            check( written, "output written" );
+            if( !written ) continue;
+
+            validate_dng_like( o, g_cli_W, g_cli_H, /*vc5=*/ i == 1 );
+
+            std::string s;
+            for( int t = 0; t < 3; ++t )
+                check( !tiff_find_ascii_tag( o.b, tags[t], s ), "no Exif date tag written" );
+            check( !tiff_find_xmp( o.b, xmp ) || xmp.find( "Date" ) == std::string::npos,
+                   "no XMP date written" );
+        }
+        std::remove( undated.c_str() );
     });
 }
 
